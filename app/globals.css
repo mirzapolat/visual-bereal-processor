@@ -73,11 +73,17 @@ select {
 .topbar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 20px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 28px;
+  flex-wrap: nowrap;
+}
+
+.topbar > div {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .logo {
@@ -97,22 +103,40 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 14px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  margin-left: auto;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
   text-decoration: none;
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
   transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.github-button svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .github-button:hover {
   color: var(--ink);
   border-color: rgba(31, 79, 214, 0.35);
   box-shadow: var(--focus);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .badge {
@@ -133,6 +157,47 @@ select {
   border-radius: var(--radius);
   padding: 24px;
   box-shadow: var(--shadow);
+}
+
+.step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.help-button {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.help-button:hover {
+  color: var(--ink);
+  border-color: rgba(31, 79, 214, 0.35);
+  box-shadow: var(--focus);
+}
+
+.help-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.help-panel ol {
+  margin: 0;
+  padding-left: 18px;
 }
 
 .dropzone {

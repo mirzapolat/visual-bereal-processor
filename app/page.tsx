@@ -28,6 +28,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showExportHelp, setShowExportHelp] = useState(false);
 
   const toggle = (key: keyof SettingsState) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -121,14 +122,44 @@ export default function Home() {
             Export your BeReal data to your phone's mobile gallery just as your normal memories look like in the app.
           </p>
         </div>
-        <a className="github-button" href="https://github.com" target="_blank" rel="noreferrer">
-          GitHub
+        <a
+          className="github-button"
+          href="https://github.com/mirzapolat/visual-bereal-processor"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View on GitHub"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 .5C5.65.5.5 5.78.5 12.3c0 5.22 3.44 9.65 8.2 11.21.6.12.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.75-4.04-1.65-4.04-1.65-.55-1.42-1.34-1.8-1.34-1.8-1.1-.78.08-.77.08-.77 1.22.09 1.86 1.27 1.86 1.27 1.08 1.92 2.84 1.37 3.53 1.05.11-.8.42-1.37.76-1.68-2.66-.31-5.46-1.35-5.46-6.03 0-1.34.46-2.43 1.24-3.29-.12-.31-.54-1.58.12-3.28 0 0 1.01-.33 3.3 1.26.96-.27 1.98-.4 3-.41 1.02.01 2.04.14 3 .41 2.29-1.59 3.3-1.26 3.3-1.26.66 1.7.24 2.97.12 3.28.78.86 1.24 1.95 1.24 3.29 0 4.69-2.81 5.72-5.49 6.02.43.38.81 1.14.81 2.3 0 1.66-.02 3-.02 3.41 0 .32.22.71.82.58 4.76-1.56 8.2-6 8.2-11.21C23.5 5.78 18.35.5 12 .5z" />
+          </svg>
+          <span className="sr-only">GitHub</span>
         </a>
       </header>
 
       <section className="card">
-        <h2>Step 1 · Upload your export</h2>
+        <div className="step-header">
+          <h2>Step 1 · Upload your export</h2>
+          <button
+            className="help-button"
+            type="button"
+            onClick={() => setShowExportHelp((prev) => !prev)}
+            aria-expanded={showExportHelp}
+            aria-controls="export-help"
+          >
+            How to export
+          </button>
+        </div>
         <p>Drag and drop the BeReal export zip, or browse your files.</p>
+        {showExportHelp ? (
+          <div id="export-help" className="help-panel">
+            <ol>
+              <li>Open BeReal and go to Settings.</li>
+              <li>Follow: Help → Contact → Ask a Question → Guidelines → Everything else → More Help.</li>
+              <li>Select “I want a copy of my data”.</li>
+              <li>Download the zip when it arrives, then upload it here.</li>
+            </ol>
+          </div>
+        ) : null}
         <label
           className={`dropzone ${dragging ? "dragging" : ""}`}
           onDragOver={(event) => {
