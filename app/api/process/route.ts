@@ -487,7 +487,7 @@ export async function GET(request: Request) {
       const filename = job.downloadName ?? "bereal-processed.zip";
       const stat = await fs.stat(job.downloadPath);
       const fileStream = createReadStream(job.downloadPath);
-      const webStream = Readable.toWeb(fileStream);
+      const webStream = Readable.toWeb(fileStream) as unknown as ReadableStream<Uint8Array>;
       return new NextResponse(webStream, {
         headers: {
           "Content-Type": "application/zip",
