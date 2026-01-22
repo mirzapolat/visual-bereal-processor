@@ -461,14 +461,18 @@ export async function GET(request: Request) {
     if (job.status !== "ready" || !job.downloadPath) {
       return NextResponse.json({ error: "File not ready." }, { status: 409 });
     }
-    const buffer = await fs.readFile(job.downloadPath);
-    const filename = job.downloadName ?? "bereal-processed.zip";
-    return new NextResponse(buffer, {
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename=${filename}`
-      }
-    });
+    try {
+      const buffer = await fs.readFile(job.downloadPath);
+      const filename = job.downloadName ?? "bereal-processed.zip";
+      return new NextResponse(buffer, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="${filename}"`
+        }
+      });
+    } catch {
+      return NextResponse.json({ error: "Export file is no longer available." }, { status: 410 });
+    }
   }
 
   return NextResponse.json({
