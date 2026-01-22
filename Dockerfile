@@ -19,6 +19,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
+    python3-venv \
     libjpeg62-turbo \
     zlib1g \
     libpng16-16 \
@@ -28,7 +29,11 @@ RUN apt-get update \
     libwebp7 \
   && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --no-cache-dir pillow piexif iptcinfo3
+RUN python3 -m venv /opt/venv \
+  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+  && /opt/venv/bin/pip install --no-cache-dir pillow piexif iptcinfo3
+
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
