@@ -170,8 +170,9 @@ export async function POST(request: Request) {
     }
 
     const buffer = outputZip.toBuffer();
+    const body = new Uint8Array(buffer);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(body, {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": "attachment; filename=bereal-processed.zip"
