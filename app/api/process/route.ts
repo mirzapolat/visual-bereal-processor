@@ -35,6 +35,7 @@ type Job = {
   error?: string;
   createdAt: number;
   expiresAt?: number;
+  exportedCount?: number;
 };
 
 const jobs = new Map<string, Job>();
@@ -117,6 +118,7 @@ type ProgressEvent = {
   stage?: string;
   current?: number;
   total?: number;
+  exported?: number;
 };
 
 const runPython = (
@@ -177,6 +179,9 @@ const updateJobProgress = (job: Job, event: ProgressEvent) => {
   }
   if (typeof event.total === "number") {
     job.progress.total = event.total;
+  }
+  if (typeof event.exported === "number") {
+    job.exportedCount = event.exported;
   }
   if (job.progress.total > 0) {
     job.progress.percent = Math.min(
@@ -356,6 +361,7 @@ export async function GET(request: Request) {
     total: job.progress.total,
     percent: job.progress.percent,
     error: job.error ?? null,
+    exportedCount: job.exportedCount ?? null,
     downloadUrl:
       job.status === "ready" ? `/api/process?jobId=${job.id}&download=1` : null
   });

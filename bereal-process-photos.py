@@ -17,12 +17,14 @@ try:
 except ImportError:
     HEIF_SUPPORTED = False
 
-def emit_progress(stage, current=None, total=None):
+def emit_progress(stage, current=None, total=None, **extra):
     payload = {"stage": stage}
     if current is not None:
         payload["current"] = current
     if total is not None:
         payload["total"] = total
+    if extra:
+        payload.update(extra)
     print(f"PROGRESS:{json.dumps(payload)}", flush=True)
 
 # ANSI escape codes for text styling
@@ -830,6 +832,14 @@ summary_width = summary_label_width + summary_value_width
 summary_dash_count = max(summary_width - len(summary_title) - 2, 0)
 summary_dash_left = summary_dash_count // 2
 summary_dash_right = summary_dash_count - summary_dash_left
+if create_combined_images == 'yes':
+    if delete_processed_files_after_combining == 'yes':
+        total_exported = combined_files_count
+    else:
+        total_exported = processed_files_count + combined_files_count
+else:
+    total_exported = processed_files_count
+
 summary_lines = [
     f"{'-' * summary_dash_left} {summary_title} {'-' * summary_dash_right}",
     f"{'Input files':<{summary_label_width}}{number_of_files:>{summary_value_width}}",
@@ -838,9 +848,10 @@ summary_lines = [
     f"{'Files skipped':<{summary_label_width}}{skipped_files_count:>{summary_value_width}}",
     f"{'Entries skipped by date':<{summary_label_width}}{skipped_entries_by_date_count:>{summary_value_width}}",
     f"{'Files combined':<{summary_label_width}}{combined_files_count:>{summary_value_width}}",
+    f"{'Files exported':<{summary_label_width}}{total_exported:>{summary_value_width}}",
 ]
 summary_text = "\n".join(summary_lines)
 if use_progress_bars:
     print("")
 output_summary(summary_text, use_verbose_logging)
-emit_progress("complete", 1, 1)
+emit_progress("complete", 1, 1, exported=total_exported)

@@ -12,6 +12,34 @@ type SettingsState = {
 
 type ToggleKey = "createCombinedImages" | "rearPhotoLarge";
 
+const accentPalette = [
+  { accent: "#1f4fd6", soft: "#e7eefb" },
+  { accent: "#0f9d58", soft: "#e6f6ee" },
+  { accent: "#f97316", soft: "#fff2e6" },
+  { accent: "#ec4899", soft: "#fde7f3" },
+  { accent: "#8b5cf6", soft: "#efe9ff" },
+  { accent: "#06b6d4", soft: "#e6f9fb" },
+  { accent: "#ef4444", soft: "#ffe7e7" },
+  { accent: "#a85520", soft: "#f4e6dc" }
+];
+
+const hexToRgb = (hex: string) => {
+  const normalized = hex.replace("#", "");
+  const value =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((char) => char + char)
+          .join("")
+      : normalized;
+  const intValue = Number.parseInt(value, 16);
+  return {
+    r: (intValue >> 16) & 255,
+    g: (intValue >> 8) & 255,
+    b: intValue & 255
+  };
+};
+
 const initialSettings: SettingsState = {
   exportFormat: "jpg",
   createCombinedImages: true,
@@ -31,6 +59,7 @@ export default function Home() {
   const [showExportHelp, setShowExportHelp] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [exportedCount, setExportedCount] = useState<number | null>(null);
   const [progress, setProgress] = useState({
     stage: "queued",
     percent: 0,
@@ -57,6 +86,7 @@ export default function Home() {
     setDownloadUrl(null);
     setJobId(null);
     setIsProcessing(false);
+    setExportedCount(null);
     setProgress({
       stage: "queued",
       percent: 0,
@@ -107,6 +137,15 @@ export default function Home() {
   }, [progress]);
 
   useEffect(() => {
+    const choice = accentPalette[Math.floor(Math.random() * accentPalette.length)];
+    const { r, g, b } = hexToRgb(choice.accent);
+    const root = document.documentElement;
+    root.style.setProperty("--accent", choice.accent);
+    root.style.setProperty("--accent-soft", choice.soft);
+    root.style.setProperty("--focus", `0 0 0 3px rgba(${r}, ${g}, ${b}, 0.16)`);
+  }, []);
+
+  useEffect(() => {
     if (!jobId || !isProcessing) {
       return;
     }
@@ -133,7 +172,14 @@ export default function Home() {
         if (data?.status === "ready") {
           setIsProcessing(false);
           setDownloadUrl(data?.downloadUrl ?? null);
-          setStatus("Processing finished. Files are ready to download.");
+          if (typeof data?.exportedCount === "number") {
+            setExportedCount(data.exportedCount);
+            setStatus(
+              `Processing finished. ${data.exportedCount} images exported. Files are ready to download.`
+            );
+          } else {
+            setStatus("Processing finished. Files are ready to download.");
+          }
           return;
         }
 
@@ -141,6 +187,7 @@ export default function Home() {
           setIsProcessing(false);
           setError(data?.error || "Processing failed.");
           setStatus(null);
+          setExportedCount(null);
           return;
         }
       } catch (err) {
@@ -149,6 +196,7 @@ export default function Home() {
         setIsProcessing(false);
         setError(message);
         setStatus(null);
+        setExportedCount(null);
       }
     };
 
@@ -229,6 +277,7 @@ export default function Home() {
     setDownloadUrl(null);
     setIsProcessing(false);
     setJobId(null);
+    setExportedCount(null);
     setProgress({
       stage: "starting",
       percent: 0,
@@ -464,17 +513,24 @@ export default function Home() {
           ) : null}
 
           {downloadUrl ? (
-            <div className="actions">
-              <a className="download" href={downloadUrl} download="bereal-processed.zip">
-                Download zip
-              </a>
-              <button className="action-button" type="button" onClick={handleExportToGallery}>
-                Export to phone gallery
-              </button>
-              <button className="action-button ghost" type="button" onClick={handleShareSite}>
-                Share this website
-              </button>
-            </div>
+            <>
+              {exportedCount !== null ? (
+                <div className="exported-count">
+                  Exported {exportedCount} image{exportedCount === 1 ? "" : "s"}.
+                </div>
+              ) : null}
+              <div className="actions">
+                <a className="download" href={downloadUrl} download="bereal-processed.zip">
+                  Download zip
+                </a>
+                <button className="action-button" type="button" onClick={handleExportToGallery}>
+                  Export to phone gallery
+                </button>
+                <button className="action-button ghost" type="button" onClick={handleShareSite}>
+                  Share this website
+                </button>
+              </div>
+            </>
           ) : null}
         </section>
       ) : null}
