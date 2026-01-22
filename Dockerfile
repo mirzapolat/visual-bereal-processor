@@ -14,6 +14,7 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV BEREAL_EXPORT_DIR=/data/exports
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -33,6 +34,8 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir pillow piexif iptcinfo3
 
+RUN mkdir -p /data/exports
+
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY --from=builder /app/.next/standalone ./
@@ -41,4 +44,5 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/bereal-process-photos.py ./bereal-process-photos.py
 
 EXPOSE 3000
+VOLUME ["/data/exports"]
 CMD ["node", "server.js"]

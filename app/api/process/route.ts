@@ -46,7 +46,8 @@ type Job = {
 };
 
 const jobs = new Map<string, Job>();
-const exportRootDir = path.join(os.tmpdir(), "bereal-exports");
+const exportRootDir =
+  process.env.BEREAL_EXPORT_DIR ?? path.join(os.tmpdir(), "bereal-exports");
 
 const cleanupJob = async (jobId: string) => {
   const job = jobs.get(jobId);
