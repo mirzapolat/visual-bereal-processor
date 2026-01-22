@@ -43,3 +43,5 @@ Thumbs.db
 
 # Docker
 *.tar
+
+docker-compose.yaml
