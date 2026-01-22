@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import path from "path";
 import os from "os";
 import fs from "fs/promises";
-import { createWriteStream } from "fs";
+import { createReadStream, createWriteStream } from "fs";
 import { Readable } from "stream";
 import { ReadableStream as NodeReadableStream } from "stream/web";
 import { spawn } from "child_process";
@@ -484,12 +484,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "File not ready." }, { status: 409 });
     }
     try {
-      const buffer = await fs.readFile(job.downloadPath);
       const filename = job.downloadName ?? "bereal-processed.zip";
-      return new NextResponse(buffer, {
+      const stat = await fs.stat(job.downloadPath);
+      const fileStream = createReadStream(job.downloadPath);
+      const webStream = Readable.toWeb(fileStream);
+      return new NextResponse(webStream, {
         headers: {
           "Content-Type": "application/zip",
-          "Content-Disposition": `attachment; filename="${filename}"`
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": stat.size.toString()
         }
       });
     } catch {
@@ -498,7 +501,9 @@ export async function GET(request: Request) {
           const outputZip = new AdmZip();
           outputZip.addLocalFolder(job.bundleDir, job.bundleName);
           const rebuiltBuffer = outputZip.toBuffer();
-          await fs.writeFile(job.downloadPath, rebuiltBuffer);
+          await fs.writeFile(job.downloadPath, rebuiltBuffer).catch(() => {
+            // Ignore cache write failures; the rebuilt buffer is still usable.
+          });
           const filename = job.downloadName ?? "bereal-processed.zip";
           return new NextResponse(new Uint8Array(rebuiltBuffer), {
             headers: {
