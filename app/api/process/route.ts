@@ -32,6 +32,7 @@ type Job = {
   progress: JobProgress;
   tempDir?: string;
   downloadPath?: string;
+  downloadName?: string;
   error?: string;
   createdAt: number;
   expiresAt?: number;
@@ -54,9 +55,19 @@ const isSafeEntry = (baseDir: string, entryName: string) => {
   return resolved.startsWith(path.resolve(baseDir));
 };
 
-const extractZipSafely = async (zipBuffer: Buffer, destDir: string) => {
+const extractZipSafely = async (
+  zipBuffer: Buffer,
+  destDir: string,
+  onProgress?: (event: ProgressEvent) => void
+) => {
   const zip = new AdmZip(zipBuffer);
   const entries = zip.getEntries();
+  const totalEntries = entries.length;
+  let extractedCount = 0;
+
+  if (totalEntries > 0) {
+    onProgress?.({ stage: "extracting", current: 0, total: totalEntries });
+  }
 
   for (const entry of entries) {
     if (!entry.entryName) continue;
@@ -70,6 +81,15 @@ const extractZipSafely = async (zipBuffer: Buffer, destDir: string) => {
     } else {
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.writeFile(targetPath, entry.getData());
+    }
+
+    extractedCount += 1;
+    if (totalEntries > 0) {
+      onProgress?.({
+        stage: "extracting",
+        current: extractedCount,
+        total: totalEntries
+      });
     }
   }
 };
@@ -119,6 +139,7 @@ type ProgressEvent = {
   current?: number;
   total?: number;
   exported?: number;
+  percent?: number;
 };
 
 const runPython = (
@@ -144,10 +165,11 @@ const runPython = (
       stdoutBuffer = lines.pop() ?? "";
       for (const line of lines) {
         const cleanedLine = line.replace(/^\r+/, "");
-        if (!cleanedLine.startsWith("PROGRESS:")) {
+        const markerIndex = cleanedLine.indexOf("PROGRESS:");
+        if (markerIndex === -1) {
           continue;
         }
-        const payload = cleanedLine.replace("PROGRESS:", "").trim();
+        const payload = cleanedLine.slice(markerIndex + "PROGRESS:".length).trim();
         try {
           const event = JSON.parse(payload) as ProgressEvent;
           onProgress?.(event);
@@ -180,6 +202,9 @@ const updateJobProgress = (job: Job, event: ProgressEvent) => {
   if (typeof event.total === "number") {
     job.progress.total = event.total;
   }
+  if (typeof event.percent === "number") {
+    job.progress.percent = Math.max(0, Math.min(100, Math.round(event.percent)));
+  }
   if (typeof event.exported === "number") {
     job.exportedCount = event.exported;
   }
@@ -189,8 +214,17 @@ const updateJobProgress = (job: Job, event: ProgressEvent) => {
       Math.round((job.progress.current / job.progress.total) * 100)
     );
   } else {
-    job.progress.percent = 0;
+    job.progress.percent = job.progress.percent ?? 0;
   }
+};
+
+const setJobStage = (job: Job, stage: string, percent: number) => {
+  updateJobProgress(job, {
+    stage,
+    percent,
+    current: 0,
+    total: 0
+  });
 };
 
 export async function POST(request: Request) {
@@ -227,7 +261,6 @@ export async function POST(request: Request) {
     const zipBuffer = Buffer.from(await upload.arrayBuffer());
 
     job.status = "running";
-    job.progress.stage = "starting";
 
     void (async () => {
       let tempDir: string | undefined;
@@ -235,7 +268,8 @@ export async function POST(request: Request) {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "bereal-"));
         job.tempDir = tempDir;
 
-        await extractZipSafely(zipBuffer, tempDir);
+        await extractZipSafely(zipBuffer, tempDir, (event) => updateJobProgress(job, event));
+        setJobStage(job, "scanning", 10);
 
         const exportRoot = await findExportRoot(tempDir);
         if (!exportRoot) {
@@ -250,6 +284,7 @@ export async function POST(request: Request) {
           return;
         }
 
+        setJobStage(job, "configuring", 15);
         const configPath = path.join(tempDir, "config.json");
         const deleteSinglesAfterCombining = settings.createCombinedImages;
         const configPayload = {
@@ -264,11 +299,14 @@ export async function POST(request: Request) {
         };
 
         await fs.writeFile(configPath, JSON.stringify(configPayload, null, 2));
+        setJobStage(job, "processing", 20);
 
         const scriptPath = path.join(process.cwd(), "bereal-process-photos.py");
         await runPython(scriptPath, configPath, exportRoot, (event) =>
           updateJobProgress(job, event)
         );
+
+        setJobStage(job, "packaging", 90);
 
         const outputEntries = await fs.readdir(exportRoot, { withFileTypes: true });
         const outputDirs = outputEntries
@@ -287,16 +325,35 @@ export async function POST(request: Request) {
           return;
         }
 
-        const outputZip = new AdmZip();
-        for (const dir of outputDirs) {
-          outputZip.addLocalFolder(path.join(exportRoot, dir), dir);
+        const exportDate = new Date().toISOString().slice(0, 10);
+        const exportBaseName = `${exportDate}_BeReal–Processing_Export`;
+        const bundleDir = path.join(tempDir, exportBaseName);
+        await fs.mkdir(bundleDir, { recursive: true });
+
+        if (outputDirs.length === 1) {
+          const srcDir = path.join(exportRoot, outputDirs[0]);
+          const entries = await fs.readdir(srcDir);
+          for (const entry of entries) {
+            await fs.rename(path.join(srcDir, entry), path.join(bundleDir, entry));
+          }
+          await fs.rm(srcDir, { recursive: true, force: true });
+        } else {
+          for (const dir of outputDirs) {
+            await fs.rename(path.join(exportRoot, dir), path.join(bundleDir, dir));
+          }
         }
 
-        const outputZipPath = path.join(tempDir, "bereal-processed.zip");
+        const outputZip = new AdmZip();
+        outputZip.addLocalFolder(bundleDir, exportBaseName);
+
+        const outputZipPath = path.join(tempDir, `${exportBaseName}.zip`);
+        setJobStage(job, "packaging", 96);
         const outputBuffer = outputZip.toBuffer();
         await fs.writeFile(outputZipPath, outputBuffer);
+        setJobStage(job, "packaging", 99);
 
         job.downloadPath = outputZipPath;
+        job.downloadName = `${exportBaseName}.zip`;
         job.status = "ready";
         job.progress = {
           stage: "complete",
@@ -347,10 +404,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "File not ready." }, { status: 409 });
     }
     const buffer = await fs.readFile(job.downloadPath);
+    const filename = job.downloadName ?? "bereal-processed.zip";
     return new NextResponse(buffer, {
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": "attachment; filename=bereal-processed.zip"
+        "Content-Disposition": `attachment; filename=${filename}`
       }
     });
   }
@@ -363,6 +421,7 @@ export async function GET(request: Request) {
     percent: job.progress.percent,
     error: job.error ?? null,
     exportedCount: job.exportedCount ?? null,
+    downloadName: job.downloadName ?? null,
     downloadUrl:
       job.status === "ready" ? `/api/process?jobId=${job.id}&download=1` : null
   });

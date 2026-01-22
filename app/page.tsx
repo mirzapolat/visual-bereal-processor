@@ -55,11 +55,17 @@ export default function Home() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadName, setDownloadName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showExportHelp, setShowExportHelp] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportedCount, setExportedCount] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState({
+    percent: 0,
+    loaded: 0,
+    total: 0
+  });
   const [progress, setProgress] = useState({
     stage: "queued",
     percent: 0,
@@ -67,12 +73,16 @@ export default function Home() {
     total: 0
   });
 
+  const inputsDisabled = loading || isProcessing;
+
   const toggle = (key: ToggleKey) => {
+    if (inputsDisabled) return;
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleToggleKey =
     (key: ToggleKey) => (event: React.KeyboardEvent<HTMLLabelElement>) => {
+      if (inputsDisabled) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         toggle(key);
@@ -84,9 +94,15 @@ export default function Home() {
     setError(null);
     setStatus(null);
     setDownloadUrl(null);
+    setDownloadName(null);
     setJobId(null);
     setIsProcessing(false);
     setExportedCount(null);
+    setUploadProgress({
+      percent: 0,
+      loaded: 0,
+      total: 0
+    });
     setProgress({
       stage: "queued",
       percent: 0,
@@ -98,21 +114,23 @@ export default function Home() {
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLLabelElement>) => {
       event.preventDefault();
+      if (inputsDisabled) return;
       setDragging(false);
       const droppedFile = event.dataTransfer.files?.[0];
       if (droppedFile) {
         handleFile(droppedFile);
       }
     },
-    [handleFile]
+    [handleFile, inputsDisabled]
   );
 
   const onBrowse = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
+      if (inputsDisabled) return;
       const newFile = event.target.files?.[0] ?? null;
       handleFile(newFile);
     },
-    [handleFile]
+    [handleFile, inputsDisabled]
   );
 
   const formattedSize = useMemo(() => {
@@ -124,7 +142,10 @@ export default function Home() {
   const progressLabel = useMemo(() => {
     const stageMap: Record<string, string> = {
       queued: "Waiting to start",
-      starting: "Preparing files",
+      extracting: "Extracting zip",
+      scanning: "Looking for export",
+      configuring: "Preparing settings",
+      packaging: "Packaging zip",
       processing: "Processing entries",
       combining: "Combining images",
       complete: "Finalizing"
@@ -135,6 +156,13 @@ export default function Home() {
     }
     return label;
   }, [progress]);
+
+  const uploadLabel = useMemo(() => {
+    if (uploadProgress.total > 0) {
+      return `Uploading zip (${uploadProgress.percent}%)`;
+    }
+    return "Uploading zip";
+  }, [uploadProgress]);
 
   useEffect(() => {
     const choice = accentPalette[Math.floor(Math.random() * accentPalette.length)];
@@ -172,6 +200,7 @@ export default function Home() {
         if (data?.status === "ready") {
           setIsProcessing(false);
           setDownloadUrl(data?.downloadUrl ?? null);
+          setDownloadName(data?.downloadName ?? null);
           if (typeof data?.exportedCount === "number") {
             setExportedCount(data.exportedCount);
             setStatus(
@@ -188,6 +217,7 @@ export default function Home() {
           setError(data?.error || "Processing failed.");
           setStatus(null);
           setExportedCount(null);
+          setDownloadName(null);
           return;
         }
       } catch (err) {
@@ -197,6 +227,7 @@ export default function Home() {
         setError(message);
         setStatus(null);
         setExportedCount(null);
+        setDownloadName(null);
       }
     };
 
@@ -265,19 +296,25 @@ export default function Home() {
     }
   }, [downloadUrl]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!file) {
       setError("Please upload your BeReal export zip file first.");
       return;
     }
 
     setLoading(true);
-    setStatus("Starting processing…");
+    setStatus("Uploading zip…");
     setError(null);
     setDownloadUrl(null);
+    setDownloadName(null);
     setIsProcessing(false);
     setJobId(null);
     setExportedCount(null);
+    setUploadProgress({
+      percent: 0,
+      loaded: 0,
+      total: 0
+    });
     setProgress({
       stage: "starting",
       percent: 0,
@@ -285,35 +322,71 @@ export default function Home() {
       total: 0
     });
 
-    try {
-      const payload = new FormData();
-      payload.append("file", file);
-      payload.append("settings", JSON.stringify(settings));
+    const payload = new FormData();
+    payload.append("file", file);
+    payload.append("settings", JSON.stringify(settings));
 
-      const response = await fetch("/api/process", {
-        method: "POST",
-        body: payload
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/process", true);
+    xhr.responseType = "json";
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        return;
+      }
+      const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+      setUploadProgress({
+        percent,
+        loaded: event.loaded,
+        total: event.total
       });
+    };
 
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || "Something went wrong while starting processing.");
+    xhr.onload = () => {
+      setLoading(false);
+      setUploadProgress((prev) => ({
+        percent: 100,
+        loaded: prev.total || prev.loaded,
+        total: prev.total || prev.loaded
+      }));
+
+      const data =
+        xhr.response ??
+        (() => {
+          try {
+            return JSON.parse(xhr.responseText);
+          } catch {
+            return {};
+          }
+        })();
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message =
+          (data as { error?: string })?.error ||
+          "Something went wrong while starting processing.";
+        setError(message);
+        setStatus(null);
+        return;
       }
 
       if (!data?.jobId) {
-        throw new Error("Missing job id from server.");
+        setError("Missing job id from server.");
+        setStatus(null);
+        return;
       }
 
       setJobId(data.jobId);
       setIsProcessing(true);
       setStatus("Processing your export…");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Processing failed.";
-      setError(message);
-      setStatus(null);
-    } finally {
+    };
+
+    xhr.onerror = () => {
       setLoading(false);
-    }
+      setError("Upload failed.");
+      setStatus(null);
+    };
+
+    xhr.send(payload);
   };
 
   return (
@@ -371,15 +444,18 @@ export default function Home() {
           </div>
         ) : null}
         <label
-          className={`dropzone ${dragging ? "dragging" : ""}`}
+          className={`dropzone ${dragging ? "dragging" : ""} ${
+            inputsDisabled ? "disabled" : ""
+          }`}
           onDragOver={(event) => {
             event.preventDefault();
+            if (inputsDisabled) return;
             setDragging(true);
           }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
-          <input type="file" accept=".zip" onChange={onBrowse} />
+          <input type="file" accept=".zip" onChange={onBrowse} disabled={inputsDisabled} />
           <strong>{file ? "Replace zip" : "Choose zip file"}</strong>
           <p>Upload the original exported .zip you got from BeReal</p>
           {file ? (
@@ -390,9 +466,11 @@ export default function Home() {
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (inputsDisabled) return;
                   handleFile(null);
                 }}
                 aria-label="Remove uploaded file"
+                disabled={inputsDisabled}
               >
                 x
               </button>
@@ -402,6 +480,7 @@ export default function Home() {
       </section>
 
       {file ? (
+        <>
         <section className="card" style={{ marginTop: 24 }}>
           <h2 style={{ marginBottom: 12 }}>
             <span className="heading-icon" aria-hidden="true">
@@ -413,11 +492,12 @@ export default function Home() {
           </h2>
           <div className="field">
             <label
-              className="toggle"
+              className={`toggle ${inputsDisabled ? "disabled" : ""}`}
               onClick={() => toggle("createCombinedImages")}
               onKeyDown={handleToggleKey("createCombinedImages")}
               role="button"
-              tabIndex={0}
+              tabIndex={inputsDisabled ? -1 : 0}
+              aria-disabled={inputsDisabled}
             >
               <div>
                 <span>Create combined memories</span>
@@ -426,11 +506,12 @@ export default function Home() {
               <div className={`switch ${settings.createCombinedImages ? "active" : ""}`} />
             </label>
             <label
-              className="toggle"
+              className={`toggle ${inputsDisabled ? "disabled" : ""}`}
               onClick={() => toggle("rearPhotoLarge")}
               onKeyDown={handleToggleKey("rearPhotoLarge")}
               role="button"
-              tabIndex={0}
+              tabIndex={inputsDisabled ? -1 : 0}
+              aria-disabled={inputsDisabled}
             >
               <div>
                 <span>Rear photo large</span>
@@ -448,6 +529,7 @@ export default function Home() {
                 className="date-input"
                 type="date"
                 value={settings.sinceDate}
+                disabled={inputsDisabled}
                 onChange={(event) =>
                   setSettings((prev) => ({
                     ...prev,
@@ -463,6 +545,7 @@ export default function Home() {
                 className="date-input"
                 type="date"
                 value={settings.endDate}
+                disabled={inputsDisabled}
                 onChange={(event) =>
                   setSettings((prev) => ({
                     ...prev,
@@ -478,6 +561,7 @@ export default function Home() {
               id="export-format"
               className="date-input"
               value={settings.exportFormat}
+              disabled={inputsDisabled}
               onChange={(event) =>
                 setSettings((prev) => ({
                   ...prev,
@@ -490,89 +574,131 @@ export default function Home() {
               <option value="heic">HEIC</option>
             </select>
           </div>
+        </section>
+        <section className="card" style={{ marginTop: 24 }}>
+          <h2 style={{ marginBottom: 12 }}>
+            <span className="heading-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M5 4h14v2H5V4zm0 4h8v2H5V8zm0 6h14v2H5v-2zm0 4h10v2H5v-2z" />
+              </svg>
+            </span>
+            Step 3 · Process & export
+          </h2>
+          <div className="process-layout">
+            <div className="process-left">
+              {!downloadUrl ? (
+                <button
+                  className="primary-action"
+                  onClick={handleSubmit}
+                  disabled={loading || isProcessing}
+                >
+                  {loading ? "Uploading…" : isProcessing ? "Processing…" : "Process"}
+                </button>
+              ) : null}
 
-          <button
-            className="primary-action"
-            onClick={handleSubmit}
-            disabled={loading || isProcessing}
-          >
-            {loading ? "Starting…" : isProcessing ? "Processing…" : "Process"}
-          </button>
-
-          {isProcessing ? (
-            <div className="progress">
-              <div className="progress-meta">
-                <span>{progressLabel}</span>
-                <span>{progress.percent}%</span>
-              </div>
-              <div
-                className="progress-track"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={progress.percent}
-                aria-label={progressLabel}
-              >
-                <div className="progress-bar" style={{ width: `${progress.percent}%` }} />
-              </div>
-            </div>
-          ) : null}
-
-          {status ? (
-            <div className="status" style={{ marginTop: 16 }}>
-              {status}
-            </div>
-          ) : null}
-          {error ? (
-            <div
-              className="status"
-              style={{
-                marginTop: 16,
-                background: "#fef2f2",
-                color: "#991b1b",
-                borderColor: "#fecaca"
-              }}
-            >
-              {error}
-            </div>
-          ) : null}
-
-          {downloadUrl ? (
-            <>
-              {exportedCount !== null ? (
-                <div className="exported-count">
-                  Exported {exportedCount} image{exportedCount === 1 ? "" : "s"}.
+              {loading ? (
+                <div className="progress">
+                  <div className="progress-meta">
+                    <span>{uploadLabel}</span>
+                    <span>{uploadProgress.percent}%</span>
+                  </div>
+                  <div
+                    className="progress-track"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={uploadProgress.percent}
+                    aria-label={uploadLabel}
+                  >
+                    <div className="progress-bar" style={{ width: `${uploadProgress.percent}%` }} />
+                  </div>
                 </div>
               ) : null}
-              <div className="actions">
-                <a className="download" href={downloadUrl} download="bereal-processed.zip">
-                  <span className="button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M12 3v10l3.5-3.5 1.4 1.4L12 16.8 7.1 10.9l1.4-1.4L11 13V3h1zM5 19h14v2H5v-2z" />
-                    </svg>
-                  </span>
-                  Download zip
-                </a>
-                <button className="action-button" type="button" onClick={handleExportToGallery}>
-                  <span className="button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 15h14v4H5v-4z" />
-                    </svg>
-                  </span>
-                  Export to phone gallery
-                </button>
-                <button className="action-button ghost" type="button" onClick={handleShareSite}>
-                  <span className="button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M14 9l-4 2.3v3.4L14 17v-2.1l6 3.1V6l-6 3zM4 6h6v2H6v8h4v2H4V6z" />
-                    </svg>
-                  </span>
-                  Share this website
-                </button>
-              </div>
-            </>
-          ) : null}
+
+              {isProcessing ? (
+                <div className="progress">
+                  <div className="progress-meta">
+                    <span>{progressLabel}</span>
+                    <span>{progress.percent}%</span>
+                  </div>
+                  <div
+                    className="progress-track"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={progress.percent}
+                    aria-label={progressLabel}
+                  >
+                    <div className="progress-bar" style={{ width: `${progress.percent}%` }} />
+                  </div>
+                </div>
+              ) : null}
+
+              {status ? (
+                <div className="status" style={{ marginTop: 16 }}>
+                  {status}
+                </div>
+              ) : null}
+              {error ? (
+                <div
+                  className="status"
+                  style={{
+                    marginTop: 16,
+                    background: "#fef2f2",
+                    color: "#991b1b",
+                    borderColor: "#fecaca"
+                  }}
+                >
+                  {error}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="process-right">
+              {downloadUrl ? (
+                <div className="result-card">
+                  <div className="result-title">Export ready</div>
+                  {exportedCount !== null ? (
+                    <div className="exported-count">
+                      Exported {exportedCount} image{exportedCount === 1 ? "" : "s"}.
+                    </div>
+                  ) : null}
+                  <div className="actions actions-vertical">
+                    <a
+                      className="download"
+                      href={downloadUrl}
+                      download={downloadName ?? "bereal-processed.zip"}
+                    >
+                      <span className="button-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                          <path d="M12 3v10l3.5-3.5 1.4 1.4L12 16.8 7.1 10.9l1.4-1.4L11 13V3h1zM5 19h14v2H5v-2z" />
+                        </svg>
+                      </span>
+                      Download zip
+                    </a>
+                    <button className="action-button" type="button" onClick={handleExportToGallery}>
+                      <span className="button-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                          <path d="M5 5h14v10H5V5zm2 2v6h10V7H7zm-2 10h14v2H5v-2zm4-6 2-2 3 3 2-2 3 3H7z" />
+                        </svg>
+                      </span>
+                      Save to Phone Gallery
+                    </button>
+                    <button className="share-text" type="button" onClick={handleShareSite}>
+                      Like this website? Share it with a friend!
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="result-card placeholder">
+                  <div className="result-title">Export actions</div>
+                  <p>Start processing to unlock download and sharing options.</p>
+                </div>
+              )}
+            </div>
+          </div>
         </section>
+        </>
       ) : null}
 
       <section className="card" style={{ marginTop: 24 }}>

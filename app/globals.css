@@ -257,6 +257,11 @@ select {
   display: none;
 }
 
+.dropzone.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .file-pill {
   margin-top: 14px;
   display: inline-flex;
@@ -289,6 +294,11 @@ select {
   background: rgba(15, 23, 42, 0.2);
 }
 
+.file-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .field {
   display: grid;
   gap: 10px;
@@ -315,6 +325,11 @@ select {
   background: var(--surface);
   border: 1px solid var(--border);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.toggle.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .toggle > div:first-child {
@@ -457,6 +472,7 @@ select {
   );
   animation: progress-stripes 1.6s linear infinite;
   opacity: 0.7;
+  mix-blend-mode: soft-light;
 }
 
 .exported-count {
@@ -465,15 +481,86 @@ select {
   font-weight: 600;
 }
 
+.process-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr;
+}
+
+.process-left {
+  display: grid;
+  gap: 14px;
+}
+
+.process-right {
+  display: grid;
+  gap: 12px;
+}
+
+.result-card {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: grid;
+  gap: 12px;
+  box-shadow: var(--shadow);
+}
+
+.result-card.placeholder {
+  background: var(--surface-muted);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.result-card.placeholder p {
+  margin: 0;
+}
+
+.result-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.actions.actions-vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.actions.actions-vertical .download,
+.actions.actions-vertical .action-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.share-text {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  padding: 6px 0 0;
+  text-decoration: underline;
+}
+
+.share-text:hover {
+  color: var(--ink);
+}
+
 .actions {
   margin-top: 18px;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  align-items: center;
 }
 
 .action-button {
   padding: 10px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: white;
@@ -488,19 +575,14 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .button-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   fill: currentColor;
-}
-
-.download .button-icon,
-.action-button .button-icon {
-  margin-right: 8px;
 }
 
 .action-button:hover {
@@ -516,13 +598,45 @@ select {
 .download {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 10px 16px;
   border-radius: 999px;
-  background: var(--ink);
+  background: var(--accent);
   color: white;
   text-decoration: none;
   font-weight: 600;
+}
+
+.download:hover {
+  box-shadow: var(--focus);
+  transform: translateY(-1px);
+}
+
+.download .button-icon {
+  margin-right: 0;
+}
+
+@media (max-width: 720px) {
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .download,
+  .action-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .process-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 860px) {
+  .process-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @keyframes progress-stripes {
