@@ -46,12 +46,16 @@ type Job = {
 };
 
 const jobs = new Map<string, Job>();
+const exportRootDir = path.join(os.tmpdir(), "bereal-exports");
 
 const cleanupJob = async (jobId: string) => {
   const job = jobs.get(jobId);
   if (!job) return;
   if (job.tempDir) {
     await fs.rm(job.tempDir, { recursive: true, force: true });
+  }
+  if (job.bundleDir) {
+    await fs.rm(path.dirname(job.bundleDir), { recursive: true, force: true });
   }
   jobs.delete(jobId);
 };
@@ -339,10 +343,10 @@ export async function POST(request: Request) {
           job.error = "Could not find posts.json and Photos folder inside the zip.";
           await fs.rm(tempDir, { recursive: true, force: true });
           job.tempDir = undefined;
-          job.expiresAt = Date.now() + 30 * 60 * 1000;
+          job.expiresAt = Date.now() + 10 * 60 * 1000;
           setTimeout(() => {
             void cleanupJob(job.id);
-          }, 30 * 60 * 1000);
+          }, 10 * 60 * 1000);
           return;
         }
 
@@ -380,10 +384,10 @@ export async function POST(request: Request) {
           job.error = "Processing finished but no output folders were created.";
           await fs.rm(tempDir, { recursive: true, force: true });
           job.tempDir = undefined;
-          job.expiresAt = Date.now() + 30 * 60 * 1000;
+          job.expiresAt = Date.now() + 10 * 60 * 1000;
           setTimeout(() => {
             void cleanupJob(job.id);
-          }, 30 * 60 * 1000);
+          }, 10 * 60 * 1000);
           return;
         }
 
@@ -414,9 +418,20 @@ export async function POST(request: Request) {
         await fs.writeFile(outputZipPath, outputBuffer);
         setJobStage(job, "packaging", 99);
 
-        job.downloadPath = outputZipPath;
+        await fs.mkdir(exportRootDir, { recursive: true });
+        const jobExportDir = path.join(exportRootDir, job.id);
+        await fs.mkdir(jobExportDir, { recursive: true });
+        const finalBundleDir = path.join(jobExportDir, exportBaseName);
+        const finalZipPath = path.join(jobExportDir, `${exportBaseName}.zip`);
+
+        await fs.rename(bundleDir, finalBundleDir);
+        await fs.rename(outputZipPath, finalZipPath);
+        await fs.rm(tempDir, { recursive: true, force: true });
+        job.tempDir = undefined;
+
+        job.downloadPath = finalZipPath;
         job.downloadName = `${exportBaseName}.zip`;
-        job.bundleDir = bundleDir;
+        job.bundleDir = finalBundleDir;
         job.bundleName = exportBaseName;
         job.status = "ready";
         job.progress = {
@@ -425,19 +440,19 @@ export async function POST(request: Request) {
           total: 1,
           percent: 100
         };
-        job.expiresAt = Date.now() + 30 * 60 * 1000;
+        job.expiresAt = Date.now() + 10 * 60 * 1000;
         setTimeout(() => {
           void cleanupJob(job.id);
-        }, 30 * 60 * 1000);
+        }, 10 * 60 * 1000);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unexpected error.";
         job.status = "error";
         job.error = message;
         await fs.rm(tempDir, { recursive: true, force: true });
-        job.expiresAt = Date.now() + 30 * 60 * 1000;
+        job.expiresAt = Date.now() + 10 * 60 * 1000;
         setTimeout(() => {
           void cleanupJob(job.id);
-        }, 30 * 60 * 1000);
+        }, 10 * 60 * 1000);
       }
     })();
 

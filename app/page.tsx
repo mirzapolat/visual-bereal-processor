@@ -712,7 +712,7 @@ export default function Home() {
         </h2>
         <p>
           Your upload is used only to generate your export. Files are stored
-          temporarily during processing and removed immediately after your download. We don’t retain or share your data.
+          temporarily during processing and removed shortly after (within minutes). We don’t retain or share your data.
         </p>
       </section>
 
