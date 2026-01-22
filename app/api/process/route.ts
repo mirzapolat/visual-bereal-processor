@@ -6,12 +6,11 @@ import { spawn } from "child_process";
 import AdmZip from "adm-zip";
 
 type SettingsPayload = {
-  convertToJpeg: boolean;
-  keepOriginalFilename: boolean;
+  exportFormat: "jpg" | "png" | "heic";
   createCombinedImages: boolean;
-  deleteProcessedFilesAfterCombining: boolean;
-  verboseLogging: boolean;
+  rearPhotoLarge: boolean;
   sinceDate: string;
+  endDate: string;
 };
 
 export const runtime = "nodejs";
@@ -139,13 +138,16 @@ export async function POST(request: Request) {
     }
 
     const configPath = path.join(tempDir, "config.json");
+    const deleteSinglesAfterCombining = settings.createCombinedImages;
     const configPayload = {
-      convert_to_jpeg: settings.convertToJpeg,
-      keep_original_filename: settings.keepOriginalFilename,
+      export_format: settings.exportFormat,
+      keep_original_filename: false,
       create_combined_images: settings.createCombinedImages,
-      delete_processed_files_after_combining: settings.deleteProcessedFilesAfterCombining,
-      use_verbose_logging: settings.verboseLogging,
-      since_date: settings.sinceDate || null
+      rear_photo_large: settings.rearPhotoLarge,
+      delete_processed_files_after_combining: deleteSinglesAfterCombining,
+      use_verbose_logging: false,
+      since_date: settings.sinceDate || null,
+      until_date: settings.endDate || null
     };
 
     await fs.writeFile(configPath, JSON.stringify(configPayload, null, 2));

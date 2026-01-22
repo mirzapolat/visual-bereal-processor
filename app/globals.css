@@ -254,6 +254,16 @@ select {
   margin-bottom: 16px;
 }
 
+.date-filters {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.date-filters .field {
+  margin-bottom: 0;
+}
+
 .toggle {
   display: flex;
   align-items: center;
@@ -371,6 +381,13 @@ select {
 
   .card {
     padding: 20px;
+  }
+}
+
+@media (min-width: 900px) {
+  .date-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
   }
 }
 

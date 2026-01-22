@@ -3,21 +3,19 @@
 import { useCallback, useMemo, useState } from "react";
 
 type SettingsState = {
-  convertToJpeg: boolean;
-  keepOriginalFilename: boolean;
+  exportFormat: "jpg" | "png" | "heic";
   createCombinedImages: boolean;
-  deleteProcessedFilesAfterCombining: boolean;
-  verboseLogging: boolean;
+  rearPhotoLarge: boolean;
   sinceDate: string;
+  endDate: string;
 };
 
 const initialSettings: SettingsState = {
-  convertToJpeg: true,
-  keepOriginalFilename: false,
+  exportFormat: "jpg",
   createCombinedImages: true,
-  deleteProcessedFilesAfterCombining: true,
-  verboseLogging: false,
-  sinceDate: ""
+  rearPhotoLarge: true,
+  sinceDate: "",
+  endDate: ""
 };
 
 export default function Home() {
@@ -182,34 +180,8 @@ export default function Home() {
 
       {file ? (
         <section className="card" style={{ marginTop: 24 }}>
-          <h2>Step 2 · Adjust settings</h2>
+          <h2 style={{ marginBottom: 12 }}>Step 2 · Adjust settings</h2>
           <div className="field">
-            <label
-              className="toggle"
-              onClick={() => toggle("convertToJpeg")}
-              onKeyDown={handleToggleKey("convertToJpeg")}
-              role="button"
-              tabIndex={0}
-            >
-              <div>
-                <span>Convert WebP to JPEG</span>
-                <small>Also embeds EXIF + IPTC metadata.</small>
-              </div>
-              <div className={`switch ${settings.convertToJpeg ? "active" : ""}`} />
-            </label>
-            <label
-              className="toggle"
-              onClick={() => toggle("keepOriginalFilename")}
-              onKeyDown={handleToggleKey("keepOriginalFilename")}
-              role="button"
-              tabIndex={0}
-            >
-              <div>
-                <span>Keep original filenames</span>
-                <small>Appends the original name after the timestamp.</small>
-              </div>
-              <div className={`switch ${settings.keepOriginalFilename ? "active" : ""}`} />
-            </label>
             <label
               className="toggle"
               onClick={() => toggle("createCombinedImages")}
@@ -219,56 +191,74 @@ export default function Home() {
             >
               <div>
                 <span>Create combined memories</span>
-                <small>Stitches primary + secondary shots.</small>
+                <small>Stitches primary + secondary shots. Singles export only when off.</small>
               </div>
               <div className={`switch ${settings.createCombinedImages ? "active" : ""}`} />
             </label>
             <label
               className="toggle"
-              onClick={() => toggle("deleteProcessedFilesAfterCombining")}
-              onKeyDown={handleToggleKey("deleteProcessedFilesAfterCombining")}
+              onClick={() => toggle("rearPhotoLarge")}
+              onKeyDown={handleToggleKey("rearPhotoLarge")}
               role="button"
               tabIndex={0}
             >
               <div>
-                <span>Delete singles after combining</span>
-                <small>Keeps only combined images if enabled.</small>
+                <span>Rear photo large</span>
+                <small>If off, the front photo becomes large instead.</small>
               </div>
-              <div
-                className={`switch ${
-                  settings.deleteProcessedFilesAfterCombining ? "active" : ""
-                }`}
-              />
-            </label>
-            <label
-              className="toggle"
-              onClick={() => toggle("verboseLogging")}
-              onKeyDown={handleToggleKey("verboseLogging")}
-              role="button"
-              tabIndex={0}
-            >
-              <div>
-                <span>Verbose logs</span>
-                <small>More detailed processing output.</small>
-              </div>
-              <div className={`switch ${settings.verboseLogging ? "active" : ""}`} />
+              <div className={`switch ${settings.rearPhotoLarge ? "active" : ""}`} />
             </label>
           </div>
 
+          <div className="date-filters">
+            <div className="field">
+              <label htmlFor="since-date">Start date filter</label>
+              <input
+                id="since-date"
+                className="date-input"
+                type="date"
+                value={settings.sinceDate}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    sinceDate: event.target.value
+                  }))
+                }
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="end-date">End date filter</label>
+              <input
+                id="end-date"
+                className="date-input"
+                type="date"
+                value={settings.endDate}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    endDate: event.target.value
+                  }))
+                }
+              />
+            </div>
+          </div>
           <div className="field">
-            <label htmlFor="since-date">Start date filter</label>
-            <input
-              id="since-date"
+            <label htmlFor="export-format">Export file format</label>
+            <select
+              id="export-format"
               className="date-input"
-              type="date"
-              value={settings.sinceDate}
+              value={settings.exportFormat}
               onChange={(event) =>
                 setSettings((prev) => ({
                   ...prev,
-                  sinceDate: event.target.value
+                  exportFormat: event.target.value as SettingsState["exportFormat"]
                 }))
               }
-            />
+            >
+              <option value="jpg">JPG (JPEG)</option>
+              <option value="png">PNG</option>
+              <option value="heic">HEIC</option>
+            </select>
           </div>
 
           <button className="primary-action" onClick={handleSubmit} disabled={loading}>

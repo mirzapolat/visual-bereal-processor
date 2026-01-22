@@ -10,6 +10,13 @@ import time
 import shutil
 from iptcinfo3 import IPTCInfo
 
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    HEIF_SUPPORTED = True
+except ImportError:
+    HEIF_SUPPORTED = False
+
 # ANSI escape codes for text styling
 STYLING = {
     "GREEN": "\033[92m",
@@ -121,10 +128,12 @@ startup_preamble = "\n".join(startup_preamble_lines)
 
 # Settings
 ## Default responses
-convert_to_jpeg = 'yes'
+export_format = 'jpg'
 keep_original_filename = 'no'
 create_combined_images = 'yes'
+rear_photo_large = 'yes'
 since_date = None
+until_date = None
 delete_processed_files_after_combining = 'yes'
 use_verbose_logging = 'no'
 
@@ -141,6 +150,19 @@ def normalize_yes_no(value, default):
             return 'no'
     return default
 
+def normalize_export_format(value, default):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ['jpg', 'jpeg']:
+            return 'jpg'
+        if normalized == 'png':
+            return 'png'
+        if normalized in ['heic', 'heif']:
+            return 'heic'
+    return default
+
 def parse_since_date(value):
     if value in [None, "", "null"]:
         return None
@@ -154,36 +176,63 @@ def parse_since_date(value):
             return None
     return None
 
+def parse_until_date(value):
+    if value in [None, "", "null"]:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            logging.error("Invalid until_date format in config. Expected YYYY-MM-DD.")
+            return None
+    return None
+
 def apply_config(config_values):
-    global convert_to_jpeg
-    global keep_original_filename
+    global export_format
     global create_combined_images
+    global rear_photo_large
+    global since_date
+    global until_date
+
+    export_format = normalize_export_format(config_values.get('export_format'), export_format)
+    create_combined_images = normalize_yes_no(config_values.get('create_combined_images'), create_combined_images)
+    rear_photo_large = normalize_yes_no(config_values.get('rear_photo_large'), rear_photo_large)
+    since_date = parse_since_date(config_values.get('since_date'))
+    until_date = parse_until_date(config_values.get('until_date'))
+
+def enforce_fixed_settings():
+    global keep_original_filename
     global delete_processed_files_after_combining
     global use_verbose_logging
-    global since_date
-
-    convert_to_jpeg = normalize_yes_no(config_values.get('convert_to_jpeg'), convert_to_jpeg)
-    keep_original_filename = normalize_yes_no(config_values.get('keep_original_filename'), keep_original_filename)
-    create_combined_images = normalize_yes_no(config_values.get('create_combined_images'), create_combined_images)
-    delete_processed_files_after_combining = normalize_yes_no(
-        config_values.get('delete_processed_files_after_combining'),
-        delete_processed_files_after_combining
-    )
-    use_verbose_logging = normalize_yes_no(config_values.get('use_verbose_logging'), use_verbose_logging)
-    since_date = parse_since_date(config_values.get('since_date'))
+    global until_date
+    keep_original_filename = 'no'
+    use_verbose_logging = 'no'
+    delete_processed_files_after_combining = 'yes' if create_combined_images == 'yes' else 'no'
+    if since_date and until_date and since_date > until_date:
+        logging.warning("Start date is after end date; clearing end date filter.")
+        until_date = None
+    if export_format == 'heic' and not HEIF_SUPPORTED:
+        logging.error("HEIC export requires pillow-heif. Install pillow-heif to enable HEIC output.")
+        exit()
 
 if config_mode:
     apply_config(config)
+enforce_fixed_settings()
 
 def format_since_date(value):
     if value is None:
         return "all time"
     return value.strftime("%Y-%m-%d")
 
-def format_output_style(verbose_logging):
-    if verbose_logging == 'yes':
-        return "extensive logs"
-    return "progress bars"
+def format_until_date(value):
+    if value is None:
+        return "all time"
+    return value.strftime("%Y-%m-%d")
+
+def format_export_format(value):
+    return value.upper()
 
 def output_status(message):
     if use_verbose_logging == 'yes':
@@ -218,12 +267,11 @@ def output_summary(summary_text, verbose_logging):
 print(startup_preamble)
 print(STYLING["BOLD"] + "\nStartup settings (current values):" + STYLING["RESET"])
 print(
-    f"1. Convert images from WebP to JPEG (current: {convert_to_jpeg})\n"
-    f"2. Keep original filename in renamed file (current: {keep_original_filename})\n"
-    f"3. Create combined images like BeReal memories (current: {create_combined_images})\n"
+    f"1. Export file format (current: {format_export_format(export_format)})\n"
+    f"2. Create combined images like BeReal memories (current: {create_combined_images})\n"
+    f"3. Rear photo large in combined image (current: {rear_photo_large})\n"
     f"4. Start date filter (current: {format_since_date(since_date)})\n"
-    f"5. Delete processed single files after combining (current: {delete_processed_files_after_combining})\n"
-    f"6. Output style (current: {format_output_style(use_verbose_logging)})"
+    f"5. End date filter (current: {format_until_date(until_date)})"
 )
 
 if config_mode:
@@ -235,9 +283,9 @@ if selection_input == "":
     print("Continuing with selected settings.\n")
 else:
     while True:
-        if not selection_input.isdigit() or not 1 <= int(selection_input) <= 6:
-            logging.error("Invalid selection. Enter a number between 1 and 6.")
-            selection_input = input("Enter a setting number (1-6) or press Enter to continue: ").strip()
+        if not selection_input.isdigit() or not 1 <= int(selection_input) <= 5:
+            logging.error("Invalid selection. Enter a number between 1 and 5.")
+            selection_input = input("Enter a setting number (1-5) or press Enter to continue: ").strip()
             if selection_input == "":
                 print("Continuing with selected settings.\n")
                 break
@@ -246,33 +294,34 @@ else:
         selection = int(selection_input)
 
         if selection == 1:
-            # User choice for converting to JPEG
-            convert_to_jpeg = None
-            while convert_to_jpeg not in ['yes', 'no']:
-                convert_to_jpeg = input(STYLING["BOLD"] + "\n1. Do you want to convert images from WebP to JPEG? (yes/no): " + STYLING["RESET"]).strip().lower()
-                if convert_to_jpeg == 'no':
-                    print("Your images will not be converted. No additional metadata will be added.")
-                if convert_to_jpeg not in ['yes', 'no']:
-                    logging.error("Invalid input. Please enter 'yes' or 'no'.")
+            # User choice for export format
+            export_format_input = None
+            while export_format_input not in ['jpg', 'png', 'heic', '']:
+                export_format_input = input(STYLING["BOLD"] + "\n1. Choose export format (jpg/png/heic) [default: jpg]: " + STYLING["RESET"]).strip().lower()
+                if export_format_input not in ['jpg', 'png', 'heic', '']:
+                    logging.error("Invalid input. Please enter 'jpg', 'png', or 'heic'.")
+            if export_format_input != "":
+                export_format = export_format_input
+            else:
+                export_format = 'jpg'
+            if export_format == 'heic' and not HEIF_SUPPORTED:
+                logging.error("HEIC export requires pillow-heif. Install pillow-heif to enable HEIC output.")
+                export_format = 'jpg'
 
         if selection == 2:
-            # User choice for keeping original filename
-            print(STYLING["BOLD"] + "\n2. There are two options for how output files can be named" + STYLING["RESET"] + "\n"
-            "Option 1: YYYY-MM-DDTHH-MM-SS_primary/secondary_original-filename.jpeg\n"
-            "Option 2: YYYY-MM-DDTHH-MM-SS_primary/secondary.jpeg\n"
-            "This will only influence the naming scheme of singular images.")
-            keep_original_filename = None
-            while keep_original_filename not in ['yes', 'no']:
-                keep_original_filename = input(STYLING["BOLD"] + "Do you want to keep the original filename in the renamed file? (yes/no): " + STYLING["RESET"]).strip().lower()
-                if keep_original_filename not in ['yes', 'no']:
-                    logging.error("Invalid input. Please enter 'yes' or 'no'.")
-
-        if selection == 3:
             # User choice for creating combined images
             create_combined_images = None
             while create_combined_images not in ['yes', 'no']:
-                create_combined_images = input(STYLING["BOLD"] + "\n3. Do you want to create combined images like the original BeReal memories? (yes/no): " + STYLING["RESET"]).strip().lower()
+                create_combined_images = input(STYLING["BOLD"] + "\n2. Do you want to create combined images like the original BeReal memories? (yes/no): " + STYLING["RESET"]).strip().lower()
                 if create_combined_images not in ['yes', 'no']:
+                    logging.error("Invalid input. Please enter 'yes' or 'no'.")
+
+        if selection == 3:
+            # User choice for combined image sizing
+            rear_photo_large = None
+            while rear_photo_large not in ['yes', 'no']:
+                rear_photo_large = input(STYLING["BOLD"] + "\n3. Should the rear photo be large in the combined image? (yes/no): " + STYLING["RESET"]).strip().lower()
+                if rear_photo_large not in ['yes', 'no']:
                     logging.error("Invalid input. Please enter 'yes' or 'no'.")
 
         if selection == 4:
@@ -290,59 +339,81 @@ else:
                     logging.error("Invalid date format. Please use YYYY-MM-DD or press Enter for all time.")
 
         if selection == 5:
-            # User choice for deleting processed single files
-            delete_processed_files_after_combining = None
-            while delete_processed_files_after_combining not in ['yes', 'no']:
-                delete_processed_files_after_combining = input(STYLING["BOLD"] + "\n5. Delete processed single files after combining? (yes/no) [default: yes]: " + STYLING["RESET"]).strip().lower()
-                if delete_processed_files_after_combining == "":
-                    delete_processed_files_after_combining = 'yes'
-                if delete_processed_files_after_combining not in ['yes', 'no']:
-                    logging.error("Invalid input. Please enter 'yes' or 'no'.")
+            # User choice for end date cutoff
+            print(STYLING["BOLD"] + "\n5. Do you want to filter by an end date?" + STYLING["RESET"])
+            while True:
+                date_input = input("Enter an end date (YYYY-MM-DD) or press Enter for all time: ").strip()
+                if date_input == "":
+                    until_date = None
+                    break
+                try:
+                    until_date = datetime.strptime(date_input, "%Y-%m-%d").date()
+                    break
+                except ValueError:
+                    logging.error("Invalid date format. Please use YYYY-MM-DD or press Enter for all time.")
 
-        if selection == 6:
-            # User choice for output style
-            use_verbose_logging = None
-            while use_verbose_logging not in ['yes', 'no']:
-                use_verbose_logging = input(STYLING["BOLD"] + "\n6. Use extensive logs instead of progress bars? (yes/no) [default: no]: " + STYLING["RESET"]).strip().lower()
-                if use_verbose_logging == "":
-                    use_verbose_logging = 'no'
-                if use_verbose_logging not in ['yes', 'no']:
-                    logging.error("Invalid input. Please enter 'yes' or 'no'.")
-
-        selection_input = input("\nChange another setting? Enter a number (1-6) or press Enter to start processing: ").strip()
+        selection_input = input("\nChange another setting? Enter a number (1-5) or press Enter to start processing: ").strip()
         if selection_input == "":
             print("Continuing with selected settings.\n")
             break
-        if not selection_input.isdigit() or not 1 <= int(selection_input) <= 6:
-            logging.error("Invalid selection. Enter a number between 1 and 6 or press Enter to start processing.")
-            selection_input = input("Enter a setting number (1-6) or press Enter to start processing: ").strip()
+        if not selection_input.isdigit() or not 1 <= int(selection_input) <= 5:
+            logging.error("Invalid selection. Enter a number between 1 and 5 or press Enter to start processing.")
+            selection_input = input("Enter a setting number (1-5) or press Enter to start processing: ").strip()
             if selection_input == "":
                 print("Continuing with selected settings.\n")
                 break
 
+enforce_fixed_settings()
 use_progress_bars = use_verbose_logging != 'yes'
 configure_logging(use_verbose_logging)
 
-if convert_to_jpeg == 'no' and create_combined_images == 'no':
-    print("You chose not to convert images nor do you want to output combined images.\n"
-    "The script will therefore only copy images to a new folder and rename them according to your choice without adding metadata or creating new files.\n"
-    "Script will continue to run in 5 seconds.")
-    #time.sleep(10)
+def export_extension(format_name):
+    if format_name == 'jpg':
+        return '.jpg'
+    if format_name == 'png':
+        return '.png'
+    if format_name == 'heic':
+        return '.heic'
+    return '.jpg'
 
-# Function to convert WEBP to JPEG
-def convert_webp_to_jpg(image_path):
-    if image_path.suffix.lower() == '.webp':
-        jpg_path = image_path.with_suffix('.jpg')
-        try:
-            with Image.open(image_path) as img:
-                img.convert('RGB').save(jpg_path, "JPEG", quality=80)
-                logging.info(f"Converted {image_path} to JPEG.")
-            return jpg_path, True
-        except Exception as e:
-            logging.error(f"Error converting {image_path} to JPEG: {e}")
-            return None, False
+def prepare_image_for_export(image, format_name):
+    if format_name in ['jpg', 'heic']:
+        if image.mode != 'RGB':
+            return image.convert('RGB')
+        return image
+    if format_name == 'png':
+        if image.mode in ['RGB', 'RGBA']:
+            return image
+        return image.convert('RGBA')
+    return image
+
+def save_image_for_export(image, output_path, format_name):
+    if format_name == 'heic' and not HEIF_SUPPORTED:
+        raise RuntimeError("HEIC export requires pillow-heif.")
+    image_to_save = prepare_image_for_export(image, format_name)
+    if format_name == 'jpg':
+        image_to_save.save(output_path, "JPEG", quality=80)
+    elif format_name == 'png':
+        image_to_save.save(output_path, "PNG")
+    elif format_name == 'heic':
+        image_to_save.save(output_path, "HEIF", quality=80)
     else:
+        image_to_save.save(output_path, "JPEG", quality=80)
+
+# Function to convert WEBP to selected format
+def convert_image_to_format(image_path, format_name):
+    output_extension = export_extension(format_name)
+    if image_path.suffix.lower() == output_extension:
         return image_path, False
+    output_path = image_path.with_suffix(output_extension)
+    try:
+        with Image.open(image_path) as img:
+            save_image_for_export(img, output_path, format_name)
+        logging.info(f"Converted {image_path} to {format_name.upper()}.")
+        return output_path, True
+    except Exception as e:
+        logging.error(f"Error converting {image_path} to {format_name.upper()}: {e}")
+        return None, False
 
 # Helper function to convert latitude and longitude to EXIF-friendly format
 def _convert_to_degrees(value):
@@ -577,6 +648,10 @@ for entry in data:
             skipped_entries_by_date_count += 1
             logging.info(f"Skipping entry from {taken_at.date()} before {since_date}.")
             continue
+        if until_date and taken_at.date() > until_date:
+            skipped_entries_by_date_count += 1
+            logging.info(f"Skipping entry from {taken_at.date()} after {until_date}.")
+            continue
         filtered_entries.append((entry, taken_at))
     except Exception as e:
         logging.error(f"Error reading entry {entry}: {e}")
@@ -604,43 +679,37 @@ for entry_index, (entry, taken_at) in enumerate(filtered_entries, start=1):
         
         for path, role in [(primary_path, 'primary'), (secondary_path, 'secondary')]:
             logging.info(f"Found image: {path}")
-            # Check if conversion to JPEG is enabled by the user
-            if convert_to_jpeg == 'yes':
-                # Convert WebP to JPEG if necessary
-                converted_path, converted = convert_webp_to_jpg(path)
-                if converted_path is None:
-                    skipped_files_count += 1
-                    continue  # Skip this file if conversion failed
-                if converted:
-                    converted_files_count += 1
+            # Convert to the selected export format
+            converted_path, converted = convert_image_to_format(path, export_format)
+            if converted_path is None:
+                skipped_files_count += 1
+                continue  # Skip this file if conversion failed
+            if converted:
+                converted_files_count += 1
 
             # Adjust filename based on user's choice
             time_str = taken_at.strftime("%Y-%m-%dT%H-%M-%S")  # ISO standard format with '-' instead of ':' for time
             original_filename_without_extension = Path(path).stem  # Extract original filename without extension
-            
-            if convert_to_jpeg == 'yes':
-                if keep_original_filename == 'yes':
-                    new_filename = f"{time_str}_{role}_{converted_path.name}"
-                else:
-                    new_filename = f"{time_str}_{role}.jpg"
+            output_extension = export_extension(export_format)
+
+            if keep_original_filename == 'yes':
+                new_filename = f"{time_str}_{role}_{original_filename_without_extension}{output_extension}"
             else:
-                if keep_original_filename == 'yes':
-                    new_filename = f"{time_str}_{role}_{original_filename_without_extension}.webp"
-                else:
-                    new_filename = f"{time_str}_{role}.webp"
+                new_filename = f"{time_str}_{role}{output_extension}"
             
             new_path = output_folder / new_filename
             new_path = get_unique_filename(new_path)  # Ensure the filename is unique
             
-            if convert_to_jpeg == 'yes' and converted:
+            if converted:
                 converted_path.rename(new_path)  # Move and rename the file
 
                 # Update EXIF and IPTC data
-                update_exif(new_path, taken_at, location, caption)                
-                logging.info(f"EXIF data added to converted image.")
+                if export_format == 'jpg':
+                    update_exif(new_path, taken_at, location, caption)                
+                    logging.info(f"EXIF data added to converted image.")
 
-                image_path_str = str(new_path)
-                update_iptc(image_path_str, caption)
+                    image_path_str = str(new_path)
+                    update_iptc(image_path_str, caption)
             else:
                 shutil.copy2(path, new_path) # Copy to new path
             processed_output_paths.append(new_path)
@@ -685,31 +754,27 @@ if create_combined_images == 'yes':
         timestamp = primary_new_path.stem.split('_')[0]
 
         # Construct the new file name for the combined image
-        combined_filename = f"{timestamp}_combined.webp"
-        combined_image = combine_images_with_resizing(primary_new_path, secondary_path)
+        combined_filename = f"{timestamp}_combined{export_extension(export_format)}"
+        if rear_photo_large == 'yes':
+            base_path = primary_new_path
+            overlay_path = secondary_path
+        else:
+            base_path = secondary_path
+            overlay_path = primary_new_path
+        combined_image = combine_images_with_resizing(base_path, overlay_path)
         
         combined_image_path = output_folder_combined / (combined_filename)
-        combined_image.save(combined_image_path, 'JPEG')
+        save_image_for_export(combined_image, combined_image_path, export_format)
         combined_files_count += 1
 
         logging.info(f"Combined image saved: {combined_image_path}")
 
-        update_exif(combined_image_path, primary_taken_at, primary_location, primary_caption)
-        logging.info(f"Metadata added to combined image.")
+        if export_format == 'jpg':
+            update_exif(combined_image_path, primary_taken_at, primary_location, primary_caption)
+            logging.info(f"Metadata added to combined image.")
 
-        image_path_str = str(combined_image_path)
-        update_iptc(image_path_str, primary_caption)
-
-        if convert_to_jpeg == 'yes':
-            # Convert WebP to JPEG if necessary
-            converted_path, converted = convert_webp_to_jpg(combined_image_path)
-            update_exif(converted_path, primary_taken_at, primary_location, primary_caption)
-            logging.info(f"Metadata added to converted image.")
-            image_path_str = str(converted_path)
+            image_path_str = str(combined_image_path)
             update_iptc(image_path_str, primary_caption)
-
-            if converted_path is None:
-                logging.error(f"Failed to convert combined image to JPEG: {combined_image_path}")
         if use_verbose_logging == 'yes':
             print("")
         if use_progress_bars and total_combined > 0:
@@ -734,7 +799,7 @@ if create_combined_images == 'yes': remove_backup_files(output_folder_combined)
 if use_verbose_logging == 'yes':
     print("")
 
-if convert_to_jpeg == 'yes':
+if export_format != 'webp':
     output_status(STYLING['BOLD'] + "Removing WebP files from output folder" + STYLING["RESET"])
     remove_webp_files(output_folder)
     if create_combined_images == 'yes':
