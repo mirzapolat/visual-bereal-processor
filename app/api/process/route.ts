@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import path from "path";
 import os from "os";
 import fs from "fs/promises";
+import { createWriteStream } from "fs";
+import { Readable } from "stream";
 import { spawn } from "child_process";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
+import Busboy from "busboy";
 
 type SettingsPayload = {
   exportFormat: "jpg" | "png" | "heic";
@@ -56,11 +59,11 @@ const isSafeEntry = (baseDir: string, entryName: string) => {
 };
 
 const extractZipSafely = async (
-  zipBuffer: Buffer,
+  zipPath: string,
   destDir: string,
   onProgress?: (event: ProgressEvent) => void
 ) => {
-  const zip = new AdmZip(zipBuffer);
+  const zip = new AdmZip(zipPath);
   const entries = zip.getEntries();
   const totalEntries = entries.length;
   let extractedCount = 0;
@@ -92,6 +95,60 @@ const extractZipSafely = async (
       });
     }
   }
+};
+
+const parseMultipartForm = async (
+  request: Request,
+  tempDir: string
+): Promise<{ filePath: string | null; settingsRaw: string | null }> => {
+  if (!request.body) {
+    throw new Error("Missing request body.");
+  }
+
+  return await new Promise((resolve, reject) => {
+    const headers = Object.fromEntries(request.headers);
+    const busboy = Busboy({ headers });
+    let filePath: string | null = null;
+    let settingsRaw: string | null = null;
+    const writes: Array<Promise<void>> = [];
+
+    busboy.on("file", (fieldName, file, info) => {
+      if (fieldName !== "file") {
+        file.resume();
+        return;
+      }
+      const safeName = info.filename ? path.basename(info.filename) : "upload.zip";
+      const uploadPath = path.join(tempDir, safeName);
+      filePath = uploadPath;
+      const writeStream = createWriteStream(uploadPath);
+      const writePromise = new Promise<void>((resolveWrite, rejectWrite) => {
+        writeStream.on("finish", resolveWrite);
+        writeStream.on("error", rejectWrite);
+        file.on("error", rejectWrite);
+      });
+      file.pipe(writeStream);
+      writes.push(writePromise);
+    });
+
+    busboy.on("field", (fieldName, value) => {
+      if (fieldName === "settings") {
+        settingsRaw = value;
+      }
+    });
+
+    busboy.on("error", reject);
+    busboy.on("finish", async () => {
+      try {
+        await Promise.all(writes);
+        resolve({ filePath, settingsRaw });
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    const nodeStream = Readable.fromWeb(request.body as unknown as ReadableStream);
+    nodeStream.pipe(busboy);
+  });
 };
 
 const findExportRoot = async (root: string) => {
@@ -243,32 +300,34 @@ export async function POST(request: Request) {
   jobs.set(jobId, job);
 
   try {
-    const formData = await request.formData();
-    const upload = formData.get("file");
-    const settingsRaw = formData.get("settings");
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "bereal-"));
+    job.tempDir = tempDir;
 
-    if (!upload || typeof upload === "string") {
-      jobs.delete(jobId);
+    const { filePath, settingsRaw } = await parseMultipartForm(request, tempDir);
+
+    if (!filePath) {
+      await cleanupJob(jobId);
       return NextResponse.json({ error: "Missing zip file." }, { status: 400 });
     }
 
-    if (!settingsRaw || typeof settingsRaw !== "string") {
-      jobs.delete(jobId);
+    if (!settingsRaw) {
+      await cleanupJob(jobId);
       return NextResponse.json({ error: "Missing settings payload." }, { status: 400 });
     }
 
-    const settings = JSON.parse(settingsRaw) as SettingsPayload;
-    const zipBuffer = Buffer.from(await upload.arrayBuffer());
+    let settings: SettingsPayload;
+    try {
+      settings = JSON.parse(settingsRaw) as SettingsPayload;
+    } catch {
+      await cleanupJob(jobId);
+      return NextResponse.json({ error: "Invalid settings payload." }, { status: 400 });
+    }
 
     job.status = "running";
 
     void (async () => {
-      let tempDir: string | undefined;
       try {
-        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "bereal-"));
-        job.tempDir = tempDir;
-
-        await extractZipSafely(zipBuffer, tempDir, (event) => updateJobProgress(job, event));
+        await extractZipSafely(filePath, tempDir, (event) => updateJobProgress(job, event));
         setJobStage(job, "scanning", 10);
 
         const exportRoot = await findExportRoot(tempDir);
@@ -369,9 +428,7 @@ export async function POST(request: Request) {
         const message = error instanceof Error ? error.message : "Unexpected error.";
         job.status = "error";
         job.error = message;
-        if (tempDir) {
-          await fs.rm(tempDir, { recursive: true, force: true });
-        }
+        await fs.rm(tempDir, { recursive: true, force: true });
         job.expiresAt = Date.now() + 30 * 60 * 1000;
         setTimeout(() => {
           void cleanupJob(job.id);
@@ -382,7 +439,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ jobId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error.";
-    jobs.delete(jobId);
+    await cleanupJob(jobId);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
