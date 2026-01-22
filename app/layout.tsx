@@ -53,7 +53,7 @@ export const metadata: Metadata = {
     siteName: siteTitle,
     images: [
       {
-        url: "/icons/icon-512.png",
+        url: "/web-app-manifest-512x512.png",
         width: 512,
         height: 512,
         alt: "BeReal Photo Processor icon"
@@ -64,23 +64,23 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: siteTitle,
     description: siteDescription,
-    images: ["/icons/icon-512.png"]
+    images: ["/web-app-manifest-512x512.png"]
   },
   icons: {
     icon: [
       { url: "/favicon.ico" },
-      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/favicon-16.png", sizes: "16x16", type: "image/png" }
+      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/favicon.svg", type: "image/svg+xml" }
     ],
     apple: [
       {
-        url: "/icons/apple-touch-icon.png",
+        url: "/apple-touch-icon.png",
         sizes: "180x180",
         type: "image/png"
       }
     ]
   },
-  manifest: "/manifest.webmanifest",
+  manifest: "/site.webmanifest",
   appleWebApp: {
     capable: true,
     title: siteTitle,
