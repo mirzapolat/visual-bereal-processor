@@ -4,6 +4,7 @@ import os from "os";
 import fs from "fs/promises";
 import { createWriteStream } from "fs";
 import { Readable } from "stream";
+import { ReadableStream as NodeReadableStream } from "stream/web";
 import { spawn } from "child_process";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
@@ -146,7 +147,7 @@ const parseMultipartForm = async (
       }
     });
 
-    const nodeStream = Readable.fromWeb(request.body as unknown as ReadableStream);
+    const nodeStream = Readable.fromWeb(request.body as unknown as NodeReadableStream);
     nodeStream.pipe(busboy);
   });
 };
