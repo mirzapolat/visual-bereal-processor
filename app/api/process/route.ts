@@ -37,6 +37,8 @@ type Job = {
   tempDir?: string;
   downloadPath?: string;
   downloadName?: string;
+  bundleDir?: string;
+  bundleName?: string;
   error?: string;
   createdAt: number;
   expiresAt?: number;
@@ -414,6 +416,8 @@ export async function POST(request: Request) {
 
         job.downloadPath = outputZipPath;
         job.downloadName = `${exportBaseName}.zip`;
+        job.bundleDir = bundleDir;
+        job.bundleName = exportBaseName;
         job.status = "ready";
         job.progress = {
           stage: "complete",
@@ -471,6 +475,23 @@ export async function GET(request: Request) {
         }
       });
     } catch {
+      if (job.bundleDir && job.bundleName) {
+        try {
+          const outputZip = new AdmZip();
+          outputZip.addLocalFolder(job.bundleDir, job.bundleName);
+          const rebuiltBuffer = outputZip.toBuffer();
+          await fs.writeFile(job.downloadPath, rebuiltBuffer);
+          const filename = job.downloadName ?? "bereal-processed.zip";
+          return new NextResponse(rebuiltBuffer, {
+            headers: {
+              "Content-Type": "application/zip",
+              "Content-Disposition": `attachment; filename="${filename}"`
+            }
+          });
+        } catch {
+          // fall through to 410
+        }
+      }
       return NextResponse.json({ error: "Export file is no longer available." }, { status: 410 });
     }
   }
