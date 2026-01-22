@@ -16,7 +16,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
@@ -27,11 +27,11 @@ RUN apt-get update \
     libopenjp2-7 \
     libfreetype6 \
     libwebp7 \
-  && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/venv \
-  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/venv/bin/pip install --no-cache-dir pillow piexif iptcinfo3
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/venv/bin/pip install --no-cache-dir pillow piexif iptcinfo3
 
 ENV PATH="/opt/venv/bin:$PATH"
 
