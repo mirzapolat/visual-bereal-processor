@@ -381,7 +381,7 @@ export default function Home() {
         >
           <input type="file" accept=".zip" onChange={onBrowse} />
           <strong>{file ? "Replace zip" : "Choose zip file"}</strong>
-          <p>Keep the export structure intact.</p>
+          <p>Upload the original exported .zip you got from BeReal</p>
           {file ? (
             <span className="file-pill">
               {file.name} · {formattedSize}
@@ -586,8 +586,7 @@ export default function Home() {
         </h2>
         <p>
           Your upload is used only to generate your export. Files are stored
-          temporarily during processing and removed shortly after (or when you
-          download the zip). We don’t retain or share your data.
+          temporarily during processing and removed immediately after your download. We don’t retain or share your data.
         </p>
       </section>
 
