@@ -17,6 +17,14 @@ try:
 except ImportError:
     HEIF_SUPPORTED = False
 
+def emit_progress(stage, current=None, total=None):
+    payload = {"stage": stage}
+    if current is not None:
+        payload["current"] = current
+    if total is not None:
+        payload["total"] = total
+    print(f"PROGRESS:{json.dumps(payload)}", flush=True)
+
 # ANSI escape codes for text styling
 STYLING = {
     "GREEN": "\033[92m",
@@ -215,7 +223,7 @@ def enforce_fixed_settings():
         until_date = None
     if export_format == 'heic' and not HEIF_SUPPORTED:
         logging.error("HEIC export requires pillow-heif. Install pillow-heif to enable HEIC output.")
-        exit()
+        raise SystemExit(1)
 
 if config_mode:
     apply_config(config)
@@ -659,6 +667,7 @@ for entry in data:
 total_entries = len(filtered_entries)
 if use_progress_bars and total_entries == 0:
     output_status("No entries to process.")
+emit_progress("processing", 0, total_entries)
 
 # Process files
 for entry_index, (entry, taken_at) in enumerate(filtered_entries, start=1):
@@ -733,6 +742,7 @@ for entry_index, (entry, taken_at) in enumerate(filtered_entries, start=1):
     finally:
         if use_progress_bars and total_entries > 0:
             render_progress(entry_index, total_entries, "Processing entries")
+        emit_progress("processing", entry_index, total_entries)
 
 # Create combined images if user chose 'yes'
 if create_combined_images == 'yes':
@@ -742,6 +752,7 @@ if create_combined_images == 'yes':
     total_combined = len(primary_images)
     if use_progress_bars and total_combined == 0:
         output_status("No combined images to create.")
+    emit_progress("combining", 0, total_combined)
 
     for combined_index, (primary_path, secondary_path) in enumerate(zip(primary_images, secondary_images), start=1):
         # Extract metadata from one of the images for consistency
@@ -779,6 +790,7 @@ if create_combined_images == 'yes':
             print("")
         if use_progress_bars and total_combined > 0:
             render_progress(combined_index, total_combined, "Combining images")
+        emit_progress("combining", combined_index, total_combined)
 
 if create_combined_images == 'yes' and delete_processed_files_after_combining == 'yes':
     output_status(STYLING['BOLD'] + "Deleting processed single images" + STYLING["RESET"])
@@ -831,3 +843,4 @@ summary_text = "\n".join(summary_lines)
 if use_progress_bars:
     print("")
 output_summary(summary_text, use_verbose_logging)
+emit_progress("complete", 1, 1)

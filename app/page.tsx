@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type SettingsState = {
   exportFormat: "jpg" | "png" | "heic";
@@ -9,6 +9,8 @@ type SettingsState = {
   sinceDate: string;
   endDate: string;
 };
+
+type ToggleKey = "createCombinedImages" | "rearPhotoLarge";
 
 const initialSettings: SettingsState = {
   exportFormat: "jpg",
@@ -27,13 +29,21 @@ export default function Home() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showExportHelp, setShowExportHelp] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState({
+    stage: "queued",
+    percent: 0,
+    current: 0,
+    total: 0
+  });
 
-  const toggle = (key: keyof SettingsState) => {
+  const toggle = (key: ToggleKey) => {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleToggleKey =
-    (key: keyof SettingsState) => (event: React.KeyboardEvent<HTMLLabelElement>) => {
+    (key: ToggleKey) => (event: React.KeyboardEvent<HTMLLabelElement>) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         toggle(key);
@@ -45,6 +55,14 @@ export default function Home() {
     setError(null);
     setStatus(null);
     setDownloadUrl(null);
+    setJobId(null);
+    setIsProcessing(false);
+    setProgress({
+      stage: "queued",
+      percent: 0,
+      current: 0,
+      total: 0
+    });
   }, []);
 
   const onDrop = useCallback(
@@ -73,6 +91,132 @@ export default function Home() {
     return `${mb.toFixed(2)} MB`;
   }, [file]);
 
+  const progressLabel = useMemo(() => {
+    const stageMap: Record<string, string> = {
+      queued: "Waiting to start",
+      starting: "Preparing files",
+      processing: "Processing entries",
+      combining: "Combining images",
+      complete: "Finalizing"
+    };
+    const label = stageMap[progress.stage] ?? "Processing";
+    if (progress.total > 0 && progress.stage !== "complete") {
+      return `${label} (${progress.current}/${progress.total})`;
+    }
+    return label;
+  }, [progress]);
+
+  useEffect(() => {
+    if (!jobId || !isProcessing) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/process?jobId=${jobId}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || "Could not fetch processing status.");
+        }
+
+        if (cancelled) return;
+
+        setProgress({
+          stage: data?.stage ?? "processing",
+          percent: data?.percent ?? 0,
+          current: data?.current ?? 0,
+          total: data?.total ?? 0
+        });
+
+        if (data?.status === "ready") {
+          setIsProcessing(false);
+          setDownloadUrl(data?.downloadUrl ?? null);
+          setStatus("Processing finished. Files are ready to download.");
+          return;
+        }
+
+        if (data?.status === "error") {
+          setIsProcessing(false);
+          setError(data?.error || "Processing failed.");
+          setStatus(null);
+          return;
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Status check failed.";
+        setIsProcessing(false);
+        setError(message);
+        setStatus(null);
+      }
+    };
+
+    poll();
+    const interval = window.setInterval(poll, 1200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [jobId, isProcessing]);
+
+  const handleShareSite = useCallback(async () => {
+    const shareData = {
+      title: "BeReal Processor",
+      text: "Export your BeReal memories in a photo-friendly format.",
+      url: window.location.href
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch {
+        // ignore user cancellation
+      }
+    }
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(window.location.href);
+        setStatus("Link copied to clipboard.");
+      } else {
+        setStatus("Copy the page URL to share with friends.");
+      }
+    } catch {
+      setStatus("Copy the page URL to share with friends.");
+    }
+  }, []);
+
+  const handleExportToGallery = useCallback(async () => {
+    if (!downloadUrl) return;
+    if (!navigator.share) {
+      setStatus("Sharing files is not supported on this device.");
+      return;
+    }
+
+    setStatus("Preparing files for sharing…");
+    try {
+      const response = await fetch(downloadUrl);
+      if (!response.ok) {
+        throw new Error("Failed to download the processed archive.");
+      }
+      const blob = await response.blob();
+      const file = new File([blob], "bereal-processed.zip", { type: "application/zip" });
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+        setStatus("Sharing files is not supported on this device.");
+        return;
+      }
+      await navigator.share({
+        title: "BeReal memories",
+        files: [file]
+      });
+      setStatus("Share sheet opened.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to share files.";
+      setError(message);
+      setStatus(null);
+    }
+  }, [downloadUrl]);
+
   const handleSubmit = async () => {
     if (!file) {
       setError("Please upload your BeReal export zip file first.");
@@ -80,8 +224,17 @@ export default function Home() {
     }
 
     setLoading(true);
-    setStatus("Processing your export…");
+    setStatus("Starting processing…");
     setError(null);
+    setDownloadUrl(null);
+    setIsProcessing(false);
+    setJobId(null);
+    setProgress({
+      stage: "starting",
+      percent: 0,
+      current: 0,
+      total: 0
+    });
 
     try {
       const payload = new FormData();
@@ -93,15 +246,18 @@ export default function Home() {
         body: payload
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data?.error || "Something went wrong while processing.");
+        throw new Error(data?.error || "Something went wrong while starting processing.");
       }
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setStatus("Your archive is ready.");
+      if (!data?.jobId) {
+        throw new Error("Missing job id from server.");
+      }
+
+      setJobId(data.jobId);
+      setIsProcessing(true);
+      setStatus("Processing your export…");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Processing failed.";
       setError(message);
@@ -261,9 +417,32 @@ export default function Home() {
             </select>
           </div>
 
-          <button className="primary-action" onClick={handleSubmit} disabled={loading}>
-            {loading ? "Processing…" : "Process & Download"}
+          <button
+            className="primary-action"
+            onClick={handleSubmit}
+            disabled={loading || isProcessing}
+          >
+            {loading ? "Starting…" : isProcessing ? "Processing…" : "Process"}
           </button>
+
+          {isProcessing ? (
+            <div className="progress">
+              <div className="progress-meta">
+                <span>{progressLabel}</span>
+                <span>{progress.percent}%</span>
+              </div>
+              <div
+                className="progress-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progress.percent}
+                aria-label={progressLabel}
+              >
+                <div className="progress-bar" style={{ width: `${progress.percent}%` }} />
+              </div>
+            </div>
+          ) : null}
 
           {status ? (
             <div className="status" style={{ marginTop: 16 }}>
@@ -285,10 +464,16 @@ export default function Home() {
           ) : null}
 
           {downloadUrl ? (
-            <div style={{ marginTop: 18 }}>
+            <div className="actions">
               <a className="download" href={downloadUrl} download="bereal-processed.zip">
-                Download processed zip
+                Download zip
               </a>
+              <button className="action-button" type="button" onClick={handleExportToGallery}>
+                Export to phone gallery
+              </button>
+              <button className="action-button ghost" type="button" onClick={handleShareSite}>
+                Share this website
+              </button>
             </div>
           ) : null}
         </section>

@@ -4,6 +4,7 @@ import os from "os";
 import fs from "fs/promises";
 import { spawn } from "child_process";
 import AdmZip from "adm-zip";
+import crypto from "crypto";
 
 type SettingsPayload = {
   exportFormat: "jpg" | "png" | "heic";
@@ -15,6 +16,37 @@ type SettingsPayload = {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+type JobStatus = "queued" | "running" | "ready" | "error";
+
+type JobProgress = {
+  stage: string;
+  current: number;
+  total: number;
+  percent: number;
+};
+
+type Job = {
+  id: string;
+  status: JobStatus;
+  progress: JobProgress;
+  tempDir?: string;
+  downloadPath?: string;
+  error?: string;
+  createdAt: number;
+  expiresAt?: number;
+};
+
+const jobs = new Map<string, Job>();
+
+const cleanupJob = async (jobId: string) => {
+  const job = jobs.get(jobId);
+  if (!job) return;
+  if (job.tempDir) {
+    await fs.rm(job.tempDir, { recursive: true, force: true });
+  }
+  jobs.delete(jobId);
+};
 
 const isSafeEntry = (baseDir: string, entryName: string) => {
   const resolved = path.resolve(baseDir, entryName);
@@ -81,7 +113,18 @@ const findExportRoot = async (root: string) => {
   return null;
 };
 
-const runPython = (scriptPath: string, configPath: string, baseDir: string) => {
+type ProgressEvent = {
+  stage?: string;
+  current?: number;
+  total?: number;
+};
+
+const runPython = (
+  scriptPath: string,
+  configPath: string,
+  baseDir: string,
+  onProgress?: (event: ProgressEvent) => void
+) => {
   return new Promise<void>((resolve, reject) => {
     const proc = spawn("python3", [scriptPath, "--config", configPath, "--base-dir", baseDir], {
       cwd: baseDir,
@@ -91,9 +134,25 @@ const runPython = (scriptPath: string, configPath: string, baseDir: string) => {
       }
     });
 
+    let stdoutBuffer = "";
     let stderr = "";
-    proc.stdout.on("data", () => {
-      // swallow stdout to avoid buffering issues
+    proc.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString();
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const cleanedLine = line.replace(/^\r+/, "");
+        if (!cleanedLine.startsWith("PROGRESS:")) {
+          continue;
+        }
+        const payload = cleanedLine.replace("PROGRESS:", "").trim();
+        try {
+          const event = JSON.parse(payload) as ProgressEvent;
+          onProgress?.(event);
+        } catch {
+          // ignore malformed progress lines
+        }
+      }
     });
     proc.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
@@ -109,8 +168,40 @@ const runPython = (scriptPath: string, configPath: string, baseDir: string) => {
   });
 };
 
+const updateJobProgress = (job: Job, event: ProgressEvent) => {
+  if (event.stage) {
+    job.progress.stage = event.stage;
+  }
+  if (typeof event.current === "number") {
+    job.progress.current = event.current;
+  }
+  if (typeof event.total === "number") {
+    job.progress.total = event.total;
+  }
+  if (job.progress.total > 0) {
+    job.progress.percent = Math.min(
+      100,
+      Math.round((job.progress.current / job.progress.total) * 100)
+    );
+  } else {
+    job.progress.percent = 0;
+  }
+};
+
 export async function POST(request: Request) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "bereal-"));
+  const jobId = crypto.randomUUID();
+  const job: Job = {
+    id: jobId,
+    status: "queued",
+    progress: {
+      stage: "queued",
+      current: 0,
+      total: 0,
+      percent: 0
+    },
+    createdAt: Date.now()
+  };
+  jobs.set(jobId, job);
 
   try {
     const formData = await request.formData();
@@ -118,72 +209,154 @@ export async function POST(request: Request) {
     const settingsRaw = formData.get("settings");
 
     if (!upload || typeof upload === "string") {
+      jobs.delete(jobId);
       return NextResponse.json({ error: "Missing zip file." }, { status: 400 });
     }
 
     if (!settingsRaw || typeof settingsRaw !== "string") {
+      jobs.delete(jobId);
       return NextResponse.json({ error: "Missing settings payload." }, { status: 400 });
     }
 
     const settings = JSON.parse(settingsRaw) as SettingsPayload;
-
     const zipBuffer = Buffer.from(await upload.arrayBuffer());
-    await extractZipSafely(zipBuffer, tempDir);
 
-    const exportRoot = await findExportRoot(tempDir);
-    if (!exportRoot) {
-      return NextResponse.json({
-        error: "Could not find posts.json and Photos folder inside the zip."
-      }, { status: 400 });
+    job.status = "running";
+    job.progress.stage = "starting";
+
+    void (async () => {
+      let tempDir: string | undefined;
+      try {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "bereal-"));
+        job.tempDir = tempDir;
+
+        await extractZipSafely(zipBuffer, tempDir);
+
+        const exportRoot = await findExportRoot(tempDir);
+        if (!exportRoot) {
+          job.status = "error";
+          job.error = "Could not find posts.json and Photos folder inside the zip.";
+          await fs.rm(tempDir, { recursive: true, force: true });
+          job.tempDir = undefined;
+          job.expiresAt = Date.now() + 30 * 60 * 1000;
+          setTimeout(() => {
+            void cleanupJob(job.id);
+          }, 30 * 60 * 1000);
+          return;
+        }
+
+        const configPath = path.join(tempDir, "config.json");
+        const deleteSinglesAfterCombining = settings.createCombinedImages;
+        const configPayload = {
+          export_format: settings.exportFormat,
+          keep_original_filename: false,
+          create_combined_images: settings.createCombinedImages,
+          rear_photo_large: settings.rearPhotoLarge,
+          delete_processed_files_after_combining: deleteSinglesAfterCombining,
+          use_verbose_logging: false,
+          since_date: settings.sinceDate || null,
+          until_date: settings.endDate || null
+        };
+
+        await fs.writeFile(configPath, JSON.stringify(configPayload, null, 2));
+
+        const scriptPath = path.join(process.cwd(), "bereal-process-photos.py");
+        await runPython(scriptPath, configPath, exportRoot, (event) =>
+          updateJobProgress(job, event)
+        );
+
+        const outputEntries = await fs.readdir(exportRoot, { withFileTypes: true });
+        const outputDirs = outputEntries
+          .filter((entry) => entry.isDirectory() && entry.name.startsWith("__"))
+          .map((entry) => entry.name);
+
+        if (outputDirs.length === 0) {
+          job.status = "error";
+          job.error = "Processing finished but no output folders were created.";
+          await fs.rm(tempDir, { recursive: true, force: true });
+          job.tempDir = undefined;
+          job.expiresAt = Date.now() + 30 * 60 * 1000;
+          setTimeout(() => {
+            void cleanupJob(job.id);
+          }, 30 * 60 * 1000);
+          return;
+        }
+
+        const outputZip = new AdmZip();
+        for (const dir of outputDirs) {
+          outputZip.addLocalFolder(path.join(exportRoot, dir), dir);
+        }
+
+        const outputZipPath = path.join(tempDir, "bereal-processed.zip");
+        outputZip.writeZip(outputZipPath);
+
+        job.downloadPath = outputZipPath;
+        job.status = "ready";
+        job.progress = {
+          stage: "complete",
+          current: 1,
+          total: 1,
+          percent: 100
+        };
+        job.expiresAt = Date.now() + 30 * 60 * 1000;
+        setTimeout(() => {
+          void cleanupJob(job.id);
+        }, 30 * 60 * 1000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unexpected error.";
+        job.status = "error";
+        job.error = message;
+        if (tempDir) {
+          await fs.rm(tempDir, { recursive: true, force: true });
+        }
+        job.expiresAt = Date.now() + 30 * 60 * 1000;
+        setTimeout(() => {
+          void cleanupJob(job.id);
+        }, 30 * 60 * 1000);
+      }
+    })();
+
+    return NextResponse.json({ jobId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error.";
+    jobs.delete(jobId);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const jobId = searchParams.get("jobId");
+  if (!jobId) {
+    return NextResponse.json({ error: "Missing jobId." }, { status: 400 });
+  }
+
+  const job = jobs.get(jobId);
+  if (!job) {
+    return NextResponse.json({ error: "Job not found." }, { status: 404 });
+  }
+
+  if (searchParams.get("download") === "1") {
+    if (job.status !== "ready" || !job.downloadPath) {
+      return NextResponse.json({ error: "File not ready." }, { status: 409 });
     }
-
-    const configPath = path.join(tempDir, "config.json");
-    const deleteSinglesAfterCombining = settings.createCombinedImages;
-    const configPayload = {
-      export_format: settings.exportFormat,
-      keep_original_filename: false,
-      create_combined_images: settings.createCombinedImages,
-      rear_photo_large: settings.rearPhotoLarge,
-      delete_processed_files_after_combining: deleteSinglesAfterCombining,
-      use_verbose_logging: false,
-      since_date: settings.sinceDate || null,
-      until_date: settings.endDate || null
-    };
-
-    await fs.writeFile(configPath, JSON.stringify(configPayload, null, 2));
-
-    const scriptPath = path.join(process.cwd(), "bereal-process-photos.py");
-    await runPython(scriptPath, configPath, exportRoot);
-
-    const outputEntries = await fs.readdir(exportRoot, { withFileTypes: true });
-    const outputDirs = outputEntries
-      .filter((entry) => entry.isDirectory() && entry.name.startsWith("__"))
-      .map((entry) => entry.name);
-
-    if (outputDirs.length === 0) {
-      return NextResponse.json({
-        error: "Processing finished but no output folders were created."
-      }, { status: 500 });
-    }
-
-    const outputZip = new AdmZip();
-    for (const dir of outputDirs) {
-      outputZip.addLocalFolder(path.join(exportRoot, dir), dir);
-    }
-
-    const buffer = outputZip.toBuffer();
-    const body = new Uint8Array(buffer);
-
-    return new NextResponse(body, {
+    const buffer = await fs.readFile(job.downloadPath);
+    return new NextResponse(buffer, {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": "attachment; filename=bereal-processed.zip"
       }
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error.";
-    return NextResponse.json({ error: message }, { status: 500 });
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
   }
+
+  return NextResponse.json({
+    status: job.status,
+    stage: job.progress.stage,
+    current: job.progress.current,
+    total: job.progress.total,
+    percent: job.progress.percent,
+    error: job.error ?? null,
+    downloadUrl:
+      job.status === "ready" ? `/api/process?jobId=${job.id}&download=1` : null
+  });
 }
