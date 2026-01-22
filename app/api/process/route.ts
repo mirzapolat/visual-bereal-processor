@@ -425,8 +425,10 @@ export async function POST(request: Request) {
         const finalBundleDir = path.join(jobExportDir, exportBaseName);
         const finalZipPath = path.join(jobExportDir, `${exportBaseName}.zip`);
 
-        await fs.rename(bundleDir, finalBundleDir);
-        await fs.rename(outputZipPath, finalZipPath);
+        await fs.cp(bundleDir, finalBundleDir, { recursive: true });
+        await fs.copyFile(outputZipPath, finalZipPath);
+        await fs.rm(bundleDir, { recursive: true, force: true });
+        await fs.rm(outputZipPath, { force: true });
         await fs.rm(tempDir, { recursive: true, force: true });
         job.tempDir = undefined;
 
