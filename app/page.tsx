@@ -341,7 +341,14 @@ export default function Home() {
 
       <section className="card">
         <div className="step-header">
-          <h2>Step 1 · Upload your export</h2>
+          <h2>
+            <span className="heading-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 15h14v4H5v-4z" />
+              </svg>
+            </span>
+            Step 1 · Upload your export
+          </h2>
           <button
             className="help-button"
             type="button"
@@ -378,6 +385,17 @@ export default function Home() {
           {file ? (
             <span className="file-pill">
               {file.name} · {formattedSize}
+              <button
+                className="file-clear"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleFile(null);
+                }}
+                aria-label="Remove uploaded file"
+              >
+                x
+              </button>
             </span>
           ) : null}
         </label>
@@ -385,7 +403,14 @@ export default function Home() {
 
       {file ? (
         <section className="card" style={{ marginTop: 24 }}>
-          <h2 style={{ marginBottom: 12 }}>Step 2 · Adjust settings</h2>
+          <h2 style={{ marginBottom: 12 }}>
+            <span className="heading-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 7h10v2H4V7zm0 8h16v2H4v-2zm0-4h16v2H4v-2zm12-4h4v2h-4V7z" />
+              </svg>
+            </span>
+            Step 2 · Adjust settings
+          </h2>
           <div className="field">
             <label
               className="toggle"
@@ -521,12 +546,27 @@ export default function Home() {
               ) : null}
               <div className="actions">
                 <a className="download" href={downloadUrl} download="bereal-processed.zip">
+                  <span className="button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M12 3v10l3.5-3.5 1.4 1.4L12 16.8 7.1 10.9l1.4-1.4L11 13V3h1zM5 19h14v2H5v-2z" />
+                    </svg>
+                  </span>
                   Download zip
                 </a>
                 <button className="action-button" type="button" onClick={handleExportToGallery}>
+                  <span className="button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 15h14v4H5v-4z" />
+                    </svg>
+                  </span>
                   Export to phone gallery
                 </button>
                 <button className="action-button ghost" type="button" onClick={handleShareSite}>
+                  <span className="button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M14 9l-4 2.3v3.4L14 17v-2.1l6 3.1V6l-6 3zM4 6h6v2H6v8h4v2H4V6z" />
+                    </svg>
+                  </span>
                   Share this website
                 </button>
               </div>
@@ -536,10 +576,18 @@ export default function Home() {
       ) : null}
 
       <section className="card" style={{ marginTop: 24 }}>
-        <h2>Privacy</h2>
+        <h2>
+          <span className="heading-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 3l7 4v5c0 4.4-3 8.4-7 9-4-0.6-7-4.6-7-9V7l7-4zm0 4.1L7 8.9v3.1c0 3.2 2 6.3 5 6.9 3-0.6 5-3.7 5-6.9V8.9l-5-1.8z" />
+            </svg>
+          </span>
+          Privacy
+        </h2>
         <p>
-          Files are processed on the server and discarded immediately after the zip is
-          generated.
+          Your upload is used only to generate your export. Files are stored
+          temporarily during processing and removed shortly after (or when you
+          download the zip). We don’t retain or share your data.
         </p>
       </section>
 
