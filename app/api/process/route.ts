@@ -293,7 +293,8 @@ export async function POST(request: Request) {
         }
 
         const outputZipPath = path.join(tempDir, "bereal-processed.zip");
-        outputZip.writeZip(outputZipPath);
+        const outputBuffer = outputZip.toBuffer();
+        await fs.writeFile(outputZipPath, outputBuffer);
 
         job.downloadPath = outputZipPath;
         job.status = "ready";
