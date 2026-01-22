@@ -482,7 +482,7 @@ export async function GET(request: Request) {
           const rebuiltBuffer = outputZip.toBuffer();
           await fs.writeFile(job.downloadPath, rebuiltBuffer);
           const filename = job.downloadName ?? "bereal-processed.zip";
-          return new NextResponse(rebuiltBuffer, {
+          return new NextResponse(new Uint8Array(rebuiltBuffer), {
             headers: {
               "Content-Type": "application/zip",
               "Content-Disposition": `attachment; filename="${filename}"`
