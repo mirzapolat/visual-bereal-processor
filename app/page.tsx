@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  processBeRealExport,
+  type ProcessorProgress,
+  type ProcessorSettings
+} from "./lib/bereal-browser-processor";
 
-type SettingsState = {
-  exportFormat: "jpg" | "png" | "heic";
-  createCombinedImages: boolean;
-  rearPhotoLarge: boolean;
-  sinceDate: string;
-  endDate: string;
-};
+type SettingsState = ProcessorSettings;
 
 type ToggleKey = "createCombinedImages" | "rearPhotoLarge";
 
@@ -48,6 +47,13 @@ const initialSettings: SettingsState = {
   endDate: ""
 };
 
+const initialProgress: ProcessorProgress = {
+  stage: "scanning",
+  current: 0,
+  total: 0,
+  percent: 0
+};
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [settings, setSettings] = useState<SettingsState>(initialSettings);
@@ -55,29 +61,38 @@ export default function Home() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadBlob, setDownloadBlob] = useState<Blob | null>(null);
   const [downloadName, setDownloadName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showExportHelp, setShowExportHelp] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showExportHelp, setShowExportHelp] = useState(false);
   const [exportedCount, setExportedCount] = useState<number | null>(null);
-  const [uploadProgress, setUploadProgress] = useState({
-    percent: 0,
-    loaded: 0,
-    total: 0
-  });
-  const [progress, setProgress] = useState({
-    stage: "queued",
-    percent: 0,
-    current: 0,
-    total: 0
-  });
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [progress, setProgress] = useState<ProcessorProgress>(initialProgress);
 
-  const inputsDisabled = loading || isProcessing;
+  const inputsDisabled = isProcessing;
+
+  const clearDownloadData = useCallback(() => {
+    setDownloadUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return null;
+    });
+    setDownloadBlob(null);
+    setDownloadName(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (downloadUrl) {
+        URL.revokeObjectURL(downloadUrl);
+      }
+    };
+  }, [downloadUrl]);
 
   const toggle = (key: ToggleKey) => {
     if (inputsDisabled) return;
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
+    setSettings((previous) => ({ ...previous, [key]: !previous[key] }));
   };
 
   const handleToggleKey =
@@ -89,27 +104,19 @@ export default function Home() {
       }
     };
 
-  const handleFile = useCallback((newFile: File | null) => {
-    setFile(newFile);
-    setError(null);
-    setStatus(null);
-    setDownloadUrl(null);
-    setDownloadName(null);
-    setJobId(null);
-    setIsProcessing(false);
-    setExportedCount(null);
-    setUploadProgress({
-      percent: 0,
-      loaded: 0,
-      total: 0
-    });
-    setProgress({
-      stage: "queued",
-      percent: 0,
-      current: 0,
-      total: 0
-    });
-  }, []);
+  const handleFile = useCallback(
+    (newFile: File | null) => {
+      setFile(newFile);
+      setError(null);
+      setStatus(null);
+      setWarnings([]);
+      clearDownloadData();
+      setExportedCount(null);
+      setProgress(initialProgress);
+      setIsProcessing(false);
+    },
+    [clearDownloadData]
+  );
 
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLLabelElement>) => {
@@ -140,14 +147,11 @@ export default function Home() {
   }, [file]);
 
   const progressLabel = useMemo(() => {
-    const stageMap: Record<string, string> = {
-      queued: "Waiting to start",
-      extracting: "Extracting zip",
-      scanning: "Looking for export",
-      configuring: "Preparing settings",
-      packaging: "Packaging zip",
+    const stageMap: Record<ProcessorProgress["stage"], string> = {
+      scanning: "Scanning export",
       processing: "Processing entries",
       combining: "Combining images",
+      packaging: "Packaging zip",
       complete: "Finalizing"
     };
     const label = stageMap[progress.stage] ?? "Processing";
@@ -157,13 +161,6 @@ export default function Home() {
     return label;
   }, [progress]);
 
-  const uploadLabel = useMemo(() => {
-    if (uploadProgress.total > 0) {
-      return `Uploading zip (${uploadProgress.percent}%)`;
-    }
-    return "Uploading zip";
-  }, [uploadProgress]);
-
   useEffect(() => {
     const choice = accentPalette[Math.floor(Math.random() * accentPalette.length)];
     const { r, g, b } = hexToRgb(choice.accent);
@@ -172,72 +169,6 @@ export default function Home() {
     root.style.setProperty("--accent-soft", choice.soft);
     root.style.setProperty("--focus", `0 0 0 3px rgba(${r}, ${g}, ${b}, 0.16)`);
   }, []);
-
-  useEffect(() => {
-    if (!jobId || !isProcessing) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const response = await fetch(`/api/process?jobId=${jobId}`);
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(data?.error || "Could not fetch processing status.");
-        }
-
-        if (cancelled) return;
-
-        setProgress({
-          stage: data?.stage ?? "processing",
-          percent: data?.percent ?? 0,
-          current: data?.current ?? 0,
-          total: data?.total ?? 0
-        });
-
-        if (data?.status === "ready") {
-          setIsProcessing(false);
-          setDownloadUrl(data?.downloadUrl ?? null);
-          setDownloadName(data?.downloadName ?? null);
-          if (typeof data?.exportedCount === "number") {
-            setExportedCount(data.exportedCount);
-            setStatus(
-              `Processing finished. ${data.exportedCount} images exported. Files are ready to download.`
-            );
-          } else {
-            setStatus("Processing finished. Files are ready to download.");
-          }
-          return;
-        }
-
-        if (data?.status === "error") {
-          setIsProcessing(false);
-          setError(data?.error || "Processing failed.");
-          setStatus(null);
-          setExportedCount(null);
-          setDownloadName(null);
-          return;
-        }
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : "Status check failed.";
-        setIsProcessing(false);
-        setError(message);
-        setStatus(null);
-        setExportedCount(null);
-        setDownloadName(null);
-      }
-    };
-
-    poll();
-    const interval = window.setInterval(poll, 1200);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [jobId, isProcessing]);
 
   const handleShareSite = useCallback(async () => {
     const shareData = {
@@ -250,9 +181,10 @@ export default function Home() {
         await navigator.share(shareData);
         return;
       } catch {
-        // ignore user cancellation
+        // Ignore cancellation.
       }
     }
+
     try {
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(window.location.href);
@@ -266,7 +198,7 @@ export default function Home() {
   }, []);
 
   const handleExportToGallery = useCallback(async () => {
-    if (!downloadUrl) return;
+    if (!downloadBlob || !downloadName) return;
     if (!navigator.share) {
       setStatus("Sharing files is not supported on this device.");
       return;
@@ -274,19 +206,14 @@ export default function Home() {
 
     setStatus("Preparing files for sharing…");
     try {
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        throw new Error("Failed to download the processed archive.");
-      }
-      const blob = await response.blob();
-      const file = new File([blob], "bereal-processed.zip", { type: "application/zip" });
-      if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+      const preparedFile = new File([downloadBlob], downloadName, { type: "application/zip" });
+      if (navigator.canShare && !navigator.canShare({ files: [preparedFile] })) {
         setStatus("Sharing files is not supported on this device.");
         return;
       }
       await navigator.share({
         title: "BeReal memories",
-        files: [file]
+        files: [preparedFile]
       });
       setStatus("Share sheet opened.");
     } catch (err) {
@@ -294,100 +221,60 @@ export default function Home() {
       setError(message);
       setStatus(null);
     }
-  }, [downloadUrl]);
+  }, [downloadBlob, downloadName]);
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(async () => {
     if (!file) {
       setError("Please upload your BeReal export zip file first.");
       return;
     }
 
-    setLoading(true);
-    setStatus("Uploading zip…");
+    setIsProcessing(true);
+    setStatus("Processing your export locally in this browser…");
     setError(null);
-    setDownloadUrl(null);
-    setDownloadName(null);
-    setIsProcessing(false);
-    setJobId(null);
+    setWarnings([]);
     setExportedCount(null);
-    setUploadProgress({
-      percent: 0,
-      loaded: 0,
-      total: 0
-    });
+    clearDownloadData();
     setProgress({
-      stage: "starting",
-      percent: 0,
+      stage: "scanning",
       current: 0,
-      total: 0
+      total: 0,
+      percent: 1
     });
 
-    const payload = new FormData();
-    payload.append("file", file);
-    payload.append("settings", JSON.stringify(settings));
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/process", true);
-    xhr.responseType = "json";
-
-    xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable) {
-        return;
-      }
-      const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
-      setUploadProgress({
-        percent,
-        loaded: event.loaded,
-        total: event.total
+    try {
+      const result = await processBeRealExport(file, settings, (nextProgress) => {
+        setProgress(nextProgress);
       });
-    };
 
-    xhr.onload = () => {
-      setLoading(false);
-      setUploadProgress((prev) => ({
-        percent: 100,
-        loaded: prev.total || prev.loaded,
-        total: prev.total || prev.loaded
-      }));
+      const objectUrl = URL.createObjectURL(result.blob);
+      setDownloadUrl(objectUrl);
+      setDownloadBlob(result.blob);
+      setDownloadName(result.filename);
+      setExportedCount(result.exportedCount);
+      setWarnings(result.warnings);
 
-      const data =
-        xhr.response ??
-        (() => {
-          try {
-            return JSON.parse(xhr.responseText);
-          } catch {
-            return {};
-          }
-        })();
-
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message =
-          (data as { error?: string })?.error ||
-          "Something went wrong while starting processing.";
-        setError(message);
-        setStatus(null);
-        return;
+      if (result.warnings.length > 0) {
+        setStatus(
+          `Processing finished locally. ${result.exportedCount} images exported with ${result.warnings.length} warning${
+            result.warnings.length === 1 ? "" : "s"
+          }.`
+        );
+      } else {
+        setStatus(`Processing finished locally. ${result.exportedCount} images exported.`);
       }
-
-      if (!data?.jobId) {
-        setError("Missing job id from server.");
-        setStatus(null);
-        return;
-      }
-
-      setJobId(data.jobId);
-      setIsProcessing(true);
-      setStatus("Processing your export…");
-    };
-
-    xhr.onerror = () => {
-      setLoading(false);
-      setError("Upload failed.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Local processing failed.";
+      setError(message);
       setStatus(null);
-    };
-
-    xhr.send(payload);
-  };
+      setDownloadBlob(null);
+      setDownloadName(null);
+      setWarnings([]);
+      setExportedCount(null);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [clearDownloadData, file, settings]);
 
   return (
     <main>
@@ -395,7 +282,7 @@ export default function Home() {
         <div>
           <div className="logo">GDPR BeReal Processor</div>
           <p className="tagline">
-            Export your BeReal data to your phone's mobile gallery just as your normal memories look like in the app.
+            Convert your BeReal export directly in your browser. No Python and no server-side upload needed.
           </p>
         </div>
         <a
@@ -425,7 +312,7 @@ export default function Home() {
           <button
             className="help-button"
             type="button"
-            onClick={() => setShowExportHelp((prev) => !prev)}
+            onClick={() => setShowExportHelp((previous) => !previous)}
             aria-expanded={showExportHelp}
             aria-controls="export-help"
           >
@@ -444,9 +331,7 @@ export default function Home() {
           </div>
         ) : null}
         <label
-          className={`dropzone ${dragging ? "dragging" : ""} ${
-            inputsDisabled ? "disabled" : ""
-          }`}
+          className={`dropzone ${dragging ? "dragging" : ""} ${inputsDisabled ? "disabled" : ""}`}
           onDragOver={(event) => {
             event.preventDefault();
             if (inputsDisabled) return;
@@ -481,223 +366,216 @@ export default function Home() {
 
       {file ? (
         <>
-        <section className="card" style={{ marginTop: 24 }}>
-          <h2 style={{ marginBottom: 12 }}>
-            <span className="heading-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M4 7h10v2H4V7zm0 8h16v2H4v-2zm0-4h16v2H4v-2zm12-4h4v2h-4V7z" />
-              </svg>
-            </span>
-            Step 2 · Adjust settings
-          </h2>
-          <div className="field">
-            <label
-              className={`toggle ${inputsDisabled ? "disabled" : ""}`}
-              onClick={() => toggle("createCombinedImages")}
-              onKeyDown={handleToggleKey("createCombinedImages")}
-              role="button"
-              tabIndex={inputsDisabled ? -1 : 0}
-              aria-disabled={inputsDisabled}
-            >
-              <div>
-                <span>Create combined memories</span>
-                <small>Stitches primary + secondary shots. Singles export only when off.</small>
-              </div>
-              <div className={`switch ${settings.createCombinedImages ? "active" : ""}`} />
-            </label>
-            <label
-              className={`toggle ${inputsDisabled ? "disabled" : ""}`}
-              onClick={() => toggle("rearPhotoLarge")}
-              onKeyDown={handleToggleKey("rearPhotoLarge")}
-              role="button"
-              tabIndex={inputsDisabled ? -1 : 0}
-              aria-disabled={inputsDisabled}
-            >
-              <div>
-                <span>Rear photo large</span>
-                <small>If off, the front photo becomes large instead.</small>
-              </div>
-              <div className={`switch ${settings.rearPhotoLarge ? "active" : ""}`} />
-            </label>
-          </div>
-
-          <div className="date-filters">
+          <section className="card" style={{ marginTop: 24 }}>
+            <h2 style={{ marginBottom: 12 }}>
+              <span className="heading-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M4 7h10v2H4V7zm0 8h16v2H4v-2zm0-4h16v2H4v-2zm12-4h4v2h-4V7z" />
+                </svg>
+              </span>
+              Step 2 · Adjust settings
+            </h2>
             <div className="field">
-              <label htmlFor="since-date">Start date filter</label>
-              <input
-                id="since-date"
+              <label
+                className={`toggle ${inputsDisabled ? "disabled" : ""}`}
+                onClick={() => toggle("createCombinedImages")}
+                onKeyDown={handleToggleKey("createCombinedImages")}
+                role="button"
+                tabIndex={inputsDisabled ? -1 : 0}
+                aria-disabled={inputsDisabled}
+              >
+                <div>
+                  <span>Create combined memories</span>
+                  <small>Stitches primary + secondary shots. Singles export only when off.</small>
+                </div>
+                <div className={`switch ${settings.createCombinedImages ? "active" : ""}`} />
+              </label>
+              <label
+                className={`toggle ${inputsDisabled ? "disabled" : ""}`}
+                onClick={() => toggle("rearPhotoLarge")}
+                onKeyDown={handleToggleKey("rearPhotoLarge")}
+                role="button"
+                tabIndex={inputsDisabled ? -1 : 0}
+                aria-disabled={inputsDisabled}
+              >
+                <div>
+                  <span>Rear photo large</span>
+                  <small>If off, the front photo becomes large instead.</small>
+                </div>
+                <div className={`switch ${settings.rearPhotoLarge ? "active" : ""}`} />
+              </label>
+            </div>
+
+            <div className="date-filters">
+              <div className="field">
+                <label htmlFor="since-date">Start date filter</label>
+                <input
+                  id="since-date"
+                  className="date-input"
+                  type="date"
+                  value={settings.sinceDate}
+                  disabled={inputsDisabled}
+                  onChange={(event) =>
+                    setSettings((previous) => ({
+                      ...previous,
+                      sinceDate: event.target.value
+                    }))
+                  }
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="end-date">End date filter</label>
+                <input
+                  id="end-date"
+                  className="date-input"
+                  type="date"
+                  value={settings.endDate}
+                  disabled={inputsDisabled}
+                  onChange={(event) =>
+                    setSettings((previous) => ({
+                      ...previous,
+                      endDate: event.target.value
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="export-format">Export file format</label>
+              <select
+                id="export-format"
                 className="date-input"
-                type="date"
-                value={settings.sinceDate}
+                value={settings.exportFormat}
                 disabled={inputsDisabled}
                 onChange={(event) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    sinceDate: event.target.value
+                  setSettings((previous) => ({
+                    ...previous,
+                    exportFormat: event.target.value as SettingsState["exportFormat"]
                   }))
                 }
-              />
+              >
+                <option value="jpg">JPG (JPEG)</option>
+                <option value="png">PNG</option>
+                <option value="heic">HEIC (falls back to JPG in browser mode)</option>
+              </select>
             </div>
-            <div className="field">
-              <label htmlFor="end-date">End date filter</label>
-              <input
-                id="end-date"
-                className="date-input"
-                type="date"
-                value={settings.endDate}
-                disabled={inputsDisabled}
-                onChange={(event) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    endDate: event.target.value
-                  }))
-                }
-              />
-            </div>
-          </div>
-          <div className="field">
-            <label htmlFor="export-format">Export file format</label>
-            <select
-              id="export-format"
-              className="date-input"
-              value={settings.exportFormat}
-              disabled={inputsDisabled}
-              onChange={(event) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  exportFormat: event.target.value as SettingsState["exportFormat"]
-                }))
-              }
-            >
-              <option value="jpg">JPG (JPEG)</option>
-              <option value="png">PNG</option>
-              <option value="heic">HEIC</option>
-            </select>
-          </div>
-        </section>
-        <section className="card" style={{ marginTop: 24 }}>
-          <h2 style={{ marginBottom: 12 }}>
-            <span className="heading-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M5 4h14v2H5V4zm0 4h8v2H5V8zm0 6h14v2H5v-2zm0 4h10v2H5v-2z" />
-              </svg>
-            </span>
-            Step 3 · Process & export
-          </h2>
-          <div className="process-layout">
-            <div className="process-left">
-              {!downloadUrl ? (
-                <button
-                  className="primary-action"
-                  onClick={handleSubmit}
-                  disabled={loading || isProcessing}
-                >
-                  {loading ? "Uploading…" : isProcessing ? "Processing…" : "Process"}
-                </button>
-              ) : null}
+          </section>
 
-              {loading ? (
-                <div className="progress">
-                  <div className="progress-meta">
-                    <span>{uploadLabel}</span>
-                    <span>{uploadProgress.percent}%</span>
-                  </div>
-                  <div
-                    className="progress-track"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={uploadProgress.percent}
-                    aria-label={uploadLabel}
-                  >
-                    <div className="progress-bar" style={{ width: `${uploadProgress.percent}%` }} />
-                  </div>
-                </div>
-              ) : null}
+          <section className="card" style={{ marginTop: 24 }}>
+            <h2 style={{ marginBottom: 12 }}>
+              <span className="heading-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M5 4h14v2H5V4zm0 4h8v2H5V8zm0 6h14v2H5v-2zm0 4h10v2H5v-2z" />
+                </svg>
+              </span>
+              Step 3 · Process & export
+            </h2>
+            <div className="process-layout">
+              <div className="process-left">
+                {!downloadUrl ? (
+                  <button className="primary-action" onClick={handleSubmit} disabled={isProcessing}>
+                    {isProcessing ? "Processing…" : "Process locally"}
+                  </button>
+                ) : null}
 
-              {isProcessing ? (
-                <div className="progress">
-                  <div className="progress-meta">
-                    <span>{progressLabel}</span>
-                    <span>{progress.percent}%</span>
-                  </div>
-                  <div
-                    className="progress-track"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={progress.percent}
-                    aria-label={progressLabel}
-                  >
-                    <div className="progress-bar" style={{ width: `${progress.percent}%` }} />
-                  </div>
-                </div>
-              ) : null}
-
-              {status ? (
-                <div className="status" style={{ marginTop: 16 }}>
-                  {status}
-                </div>
-              ) : null}
-              {error ? (
-                <div
-                  className="status"
-                  style={{
-                    marginTop: 16,
-                    background: "#fef2f2",
-                    color: "#991b1b",
-                    borderColor: "#fecaca"
-                  }}
-                >
-                  {error}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="process-right">
-              {downloadUrl ? (
-                <div className="result-card">
-                  <div className="result-title">Export ready</div>
-                  {exportedCount !== null ? (
-                    <div className="exported-count">
-                      Exported {exportedCount} image{exportedCount === 1 ? "" : "s"}.
+                {isProcessing ? (
+                  <div className="progress">
+                    <div className="progress-meta">
+                      <span>{progressLabel}</span>
+                      <span>{progress.percent}%</span>
                     </div>
-                  ) : null}
-                  <div className="actions actions-vertical">
-                    <a
-                      className="download"
-                      href={downloadUrl}
-                      download={downloadName ?? "bereal-processed.zip"}
+                    <div
+                      className="progress-track"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={progress.percent}
+                      aria-label={progressLabel}
                     >
-                      <span className="button-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24">
-                          <path d="M12 3v10l3.5-3.5 1.4 1.4L12 16.8 7.1 10.9l1.4-1.4L11 13V3h1zM5 19h14v2H5v-2z" />
-                        </svg>
-                      </span>
-                      Download zip
-                    </a>
-                    <button className="action-button" type="button" onClick={handleExportToGallery}>
-                      <span className="button-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24">
-                          <path d="M5 5h14v10H5V5zm2 2v6h10V7H7zm-2 10h14v2H5v-2zm4-6 2-2 3 3 2-2 3 3H7z" />
-                        </svg>
-                      </span>
-                      Save to Phone Gallery
-                    </button>
-                    <button className="share-text" type="button" onClick={handleShareSite}>
-                      Like this website? Share it with a friend!
-                    </button>
+                      <div className="progress-bar" style={{ width: `${progress.percent}%` }} />
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="result-card placeholder">
-                  <div className="result-title">Export actions</div>
-                  <p>Start processing to unlock download and sharing options.</p>
-                </div>
-              )}
+                ) : null}
+
+                {status ? (
+                  <div className="status" style={{ marginTop: 16 }}>
+                    {status}
+                  </div>
+                ) : null}
+                {error ? (
+                  <div
+                    className="status"
+                    style={{
+                      marginTop: 16,
+                      background: "#fef2f2",
+                      color: "#991b1b",
+                      borderColor: "#fecaca"
+                    }}
+                  >
+                    {error}
+                  </div>
+                ) : null}
+                {warnings.length > 0 ? (
+                  <div
+                    className="status"
+                    style={{
+                      marginTop: 16,
+                      background: "#fff7ed",
+                      color: "#9a3412",
+                      borderColor: "#fed7aa"
+                    }}
+                  >
+                    <strong>Warnings ({warnings.length})</strong>
+                    <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+                      {warnings.slice(0, 8).map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                    {warnings.length > 8 ? <p style={{ marginTop: 8 }}>Only the first 8 are shown.</p> : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="process-right">
+                {downloadUrl ? (
+                  <div className="result-card">
+                    <div className="result-title">Export ready</div>
+                    {exportedCount !== null ? (
+                      <div className="exported-count">
+                        Exported {exportedCount} image{exportedCount === 1 ? "" : "s"}.
+                      </div>
+                    ) : null}
+                    <div className="actions actions-vertical">
+                      <a className="download" href={downloadUrl} download={downloadName ?? "bereal-processed.zip"}>
+                        <span className="button-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M12 3v10l3.5-3.5 1.4 1.4L12 16.8 7.1 10.9l1.4-1.4L11 13V3h1zM5 19h14v2H5v-2z" />
+                          </svg>
+                        </span>
+                        Download zip
+                      </a>
+                      <button className="action-button" type="button" onClick={handleExportToGallery}>
+                        <span className="button-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path d="M5 5h14v10H5V5zm2 2v6h10V7H7zm-2 10h14v2H5v-2zm4-6 2-2 3 3 2-2 3 3H7z" />
+                          </svg>
+                        </span>
+                        Save to Phone Gallery
+                      </button>
+                      <button className="share-text" type="button" onClick={handleShareSite}>
+                        Like this website? Share it with a friend!
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="result-card placeholder">
+                    <div className="result-title">Export actions</div>
+                    <p>Start processing to unlock download and sharing options.</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
         </>
       ) : null}
 
@@ -711,8 +589,8 @@ export default function Home() {
           Privacy
         </h2>
         <p>
-          Your upload is used only to generate your export. Files are stored
-          temporarily during processing and removed shortly after (within minutes). We don’t retain or share your data.
+          Everything runs inside your browser on your device. Your zip is processed locally and is not uploaded to a
+          server by this app.
         </p>
       </section>
 

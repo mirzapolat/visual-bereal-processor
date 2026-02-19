@@ -1,0 +1,9 @@
+[
+  {
+    "takenAt": "2024-05-04T12:34:56.000Z",
+    "primary": { "path": "Photos/post/primary.png" },
+    "secondary": { "path": "Photos/post/secondary.png" },
+    "location": { "latitude": 37.7749, "longitude": -122.4194 },
+    "caption": "Smoke test memory"
+  }
+]
