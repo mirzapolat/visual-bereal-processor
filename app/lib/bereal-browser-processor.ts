@@ -2,7 +2,7 @@ import JSZip, { type JSZipObject } from "jszip";
 import piexif from "piexifjs";
 
 export type ProcessorSettings = {
-  exportFormat: "jpg" | "png" | "heic";
+  exportFormat: "jpg" | "png";
   createCombinedImages: boolean;
   rearPhotoLarge: boolean;
   sinceDate: string;
@@ -22,6 +22,11 @@ export type ProcessorResult = {
   exportedCount: number;
   warnings: string[];
   effectiveFormat: "jpg" | "png";
+};
+
+export type ExportDateBounds = {
+  earliestDate: string;
+  latestDate: string;
 };
 
 type PostLocation = {
@@ -59,10 +64,16 @@ type ProcessedPair = {
   caption?: string;
 };
 
+type JpegMetadataResult = {
+  blob: Blob;
+  iptcEmbedded: boolean;
+};
+
 const COMBINED_OVERLAY_SCALE = 1 / 3.33333333;
 const COMBINED_CORNER_RADIUS = 60;
 const COMBINED_OUTLINE_SIZE = 7;
 const COMBINED_POSITION = { x: 55, y: 55 };
+const textEncoder = new TextEncoder();
 
 const normalizePath = (value: string) => value.replace(/\\/g, "/").replace(/^\.\//, "");
 
@@ -86,6 +97,12 @@ const formatExifDateTimeUtc = (date: Date) =>
   `${date.getUTCFullYear()}:${pad(date.getUTCMonth() + 1)}:${pad(date.getUTCDate())} ${pad(
     date.getUTCHours()
   )}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+
+const formatIptcDateUtc = (date: Date) =>
+  `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`;
+
+const formatIptcTimeUtc = (date: Date) =>
+  `${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}+0000`;
 
 const toExifDegrees = (value: number): [[number, number], [number, number], [number, number]] => {
   const degrees = Math.floor(value);
@@ -213,6 +230,146 @@ const dataUrlToBlob = async (dataUrl: string) => {
   return response.blob();
 };
 
+const concatByteArrays = (parts: Uint8Array[]) => {
+  const totalSize = parts.reduce((sum, part) => sum + part.length, 0);
+  const merged = new Uint8Array(totalSize);
+  let offset = 0;
+  for (const part of parts) {
+    merged.set(part, offset);
+    offset += part.length;
+  }
+  return merged;
+};
+
+const buildIptcDataset = (dataset: number, value: Uint8Array) => {
+  if (dataset < 0 || dataset > 255) {
+    throw new Error("IPTC dataset id must fit in one byte.");
+  }
+  if (value.length > 0xffff) {
+    throw new Error("IPTC dataset value is too large.");
+  }
+  const header = new Uint8Array(5);
+  header[0] = 0x1c;
+  header[1] = 0x02;
+  header[2] = dataset;
+  header[3] = (value.length >> 8) & 0xff;
+  header[4] = value.length & 0xff;
+  return concatByteArrays([header, value]);
+};
+
+const buildIptcPayload = (takenAt: Date, caption?: string) => {
+  const datasets: Uint8Array[] = [];
+  // IPTC CodedCharacterSet = UTF-8 marker.
+  datasets.push(buildIptcDataset(90, new Uint8Array([0x1b, 0x25, 0x47])));
+  datasets.push(buildIptcDataset(55, textEncoder.encode(formatIptcDateUtc(takenAt))));
+  datasets.push(buildIptcDataset(60, textEncoder.encode(formatIptcTimeUtc(takenAt))));
+
+  const trimmedCaption = caption?.trim();
+  if (trimmedCaption) {
+    datasets.push(buildIptcDataset(120, textEncoder.encode(trimmedCaption)));
+  }
+
+  return concatByteArrays(datasets);
+};
+
+const buildIptcApp13Segment = (iptcPayload: Uint8Array) => {
+  const photoshopHeader = textEncoder.encode("Photoshop 3.0\u0000");
+  const resourceSignature = textEncoder.encode("8BIM");
+  const resourceId = new Uint8Array([0x04, 0x04]);
+  // Empty Pascal resource name plus required even-byte padding.
+  const resourceName = new Uint8Array([0x00, 0x00]);
+  const resourceSize = iptcPayload.length;
+  const resourceSizeBytes = new Uint8Array([
+    (resourceSize >>> 24) & 0xff,
+    (resourceSize >>> 16) & 0xff,
+    (resourceSize >>> 8) & 0xff,
+    resourceSize & 0xff
+  ]);
+  const payloadPadding = resourceSize % 2 === 0 ? new Uint8Array(0) : new Uint8Array([0x00]);
+  const app13Payload = concatByteArrays([
+    photoshopHeader,
+    resourceSignature,
+    resourceId,
+    resourceName,
+    resourceSizeBytes,
+    iptcPayload,
+    payloadPadding
+  ]);
+
+  const segmentLength = app13Payload.length + 2;
+  if (segmentLength > 0xffff) {
+    throw new Error("IPTC metadata is too large for a JPEG APP13 segment.");
+  }
+
+  const segment = new Uint8Array(4 + app13Payload.length);
+  segment[0] = 0xff;
+  segment[1] = 0xed;
+  segment[2] = (segmentLength >> 8) & 0xff;
+  segment[3] = segmentLength & 0xff;
+  segment.set(app13Payload, 4);
+  return segment;
+};
+
+const findJpegMetadataInsertOffset = (jpegData: Uint8Array) => {
+  if (jpegData.length < 4 || jpegData[0] !== 0xff || jpegData[1] !== 0xd8) {
+    throw new Error("Invalid JPEG stream.");
+  }
+
+  let offset = 2;
+  while (offset + 1 < jpegData.length) {
+    if (jpegData[offset] !== 0xff) {
+      throw new Error("Malformed JPEG marker sequence.");
+    }
+
+    let markerOffset = offset;
+    while (markerOffset + 1 < jpegData.length && jpegData[markerOffset + 1] === 0xff) {
+      markerOffset += 1;
+    }
+    if (markerOffset + 1 >= jpegData.length) {
+      break;
+    }
+
+    const marker = jpegData[markerOffset + 1];
+    if (marker === 0xda || marker === 0xd9) {
+      return markerOffset;
+    }
+
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset = markerOffset + 2;
+      continue;
+    }
+
+    if (markerOffset + 3 >= jpegData.length) {
+      throw new Error("Truncated JPEG segment.");
+    }
+    const segmentLength = (jpegData[markerOffset + 2] << 8) | jpegData[markerOffset + 3];
+    if (segmentLength < 2) {
+      throw new Error("Invalid JPEG segment length.");
+    }
+    const nextOffset = markerOffset + 2 + segmentLength;
+    if (nextOffset > jpegData.length) {
+      throw new Error("JPEG segment length exceeds file size.");
+    }
+    offset = nextOffset;
+  }
+
+  throw new Error("Could not determine JPEG metadata insertion point.");
+};
+
+const addIptcToJpeg = async (blob: Blob, takenAt: Date, caption?: string) => {
+  const jpegData = new Uint8Array(await blob.arrayBuffer());
+  const iptcPayload = buildIptcPayload(takenAt, caption);
+  const app13Segment = buildIptcApp13Segment(iptcPayload);
+  const insertOffset = findJpegMetadataInsertOffset(jpegData);
+
+  const merged = concatByteArrays([
+    jpegData.slice(0, insertOffset),
+    app13Segment,
+    jpegData.slice(insertOffset)
+  ]);
+  return new Blob([merged], { type: "image/jpeg" });
+};
+
 const loadImage = async (blob: Blob) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const objectUrl = URL.createObjectURL(blob);
@@ -336,12 +493,12 @@ const combineImages = async (
   return canvasToBlob(canvas, "image/jpeg", 0.8);
 };
 
-const addExifToJpeg = async (
+const addMetadataToJpeg = async (
   blob: Blob,
   takenAt: Date,
   location?: { latitude: number; longitude: number },
   caption?: string
-) => {
+): Promise<JpegMetadataResult> => {
   const dataUrl = await blobToDataUrl(blob);
   const exifPayload: Record<string, Record<number, unknown> | null> = {
     "0th": {},
@@ -369,7 +526,20 @@ const addExifToJpeg = async (
 
   const exifString = piexif.dump(exifPayload);
   const updatedDataUrl = piexif.insert(exifString, dataUrl);
-  return dataUrlToBlob(updatedDataUrl);
+  const exifBlob = await dataUrlToBlob(updatedDataUrl);
+
+  try {
+    const metadataBlob = await addIptcToJpeg(exifBlob, takenAt, caption);
+    return {
+      blob: metadataBlob,
+      iptcEmbedded: true
+    };
+  } catch {
+    return {
+      blob: exifBlob,
+      iptcEmbedded: false
+    };
+  }
 };
 
 const parsePosts = (value: unknown): PostPayload[] => {
@@ -378,6 +548,56 @@ const parsePosts = (value: unknown): PostPayload[] => {
   }
   return value as PostPayload[];
 };
+
+export async function extractExportDateBounds(inputZipFile: File): Promise<ExportDateBounds | null> {
+  const zip = await JSZip.loadAsync(await inputZipFile.arrayBuffer());
+  const rootPrefix = findExportRootPrefix(zip);
+  if (!rootPrefix) {
+    return null;
+  }
+
+  const { byPath } = buildFileLookup(zip);
+  const postsObject = byPath.get(normalizePath(`${rootPrefix}posts.json`).toLowerCase());
+  if (!postsObject) {
+    return null;
+  }
+
+  let rawPosts: unknown;
+  try {
+    rawPosts = JSON.parse(await postsObject.async("string"));
+  } catch {
+    return null;
+  }
+
+  let earliestTimestamp = Number.POSITIVE_INFINITY;
+  let latestTimestamp = Number.NEGATIVE_INFINITY;
+
+  for (const entry of parsePosts(rawPosts)) {
+    if (!entry?.takenAt) {
+      continue;
+    }
+    const takenAt = new Date(entry.takenAt);
+    const timestamp = takenAt.getTime();
+    if (Number.isNaN(timestamp)) {
+      continue;
+    }
+    if (timestamp < earliestTimestamp) {
+      earliestTimestamp = timestamp;
+    }
+    if (timestamp > latestTimestamp) {
+      latestTimestamp = timestamp;
+    }
+  }
+
+  if (!Number.isFinite(earliestTimestamp) || !Number.isFinite(latestTimestamp)) {
+    return null;
+  }
+
+  return {
+    earliestDate: formatDateUtc(new Date(earliestTimestamp)),
+    latestDate: formatDateUtc(new Date(latestTimestamp))
+  };
+}
 
 const normalizeLocation = (location?: PostLocation) => {
   if (
@@ -401,13 +621,9 @@ export async function processBeRealExport(
   onProgress?: (progress: ProcessorProgress) => void
 ): Promise<ProcessorResult> {
   const warnings: string[] = [];
-  const effectiveFormat: "jpg" | "png" = settings.exportFormat === "png" ? "png" : "jpg";
+  let iptcEmbeddingFailed = false;
+  const effectiveFormat: "jpg" | "png" = settings.exportFormat;
   const extension = effectiveFormat === "png" ? ".png" : ".jpg";
-
-  if (settings.exportFormat === "heic") {
-    warnings.push("HEIC export is not available in browsers yet, so JPG was used.");
-  }
-  warnings.push("IPTC metadata is skipped in browser mode; JPG exports still include EXIF metadata.");
 
   const emitProgress = (stage: ProcessorProgress["stage"], current: number, total: number, percent: number) => {
     onProgress?.({
@@ -518,7 +734,11 @@ export async function processBeRealExport(
         let outputBlob = await convertToFormatBlob(sourceBlob, effectiveFormat);
 
         if (effectiveFormat === "jpg") {
-          outputBlob = await addExifToJpeg(outputBlob, parsedPost.takenAt, location, caption);
+          const metadataResult = await addMetadataToJpeg(outputBlob, parsedPost.takenAt, location, caption);
+          outputBlob = metadataResult.blob;
+          if (!metadataResult.iptcEmbedded) {
+            iptcEmbeddingFailed = true;
+          }
         }
 
         const uniqueName = getUniqueFilename(`${timestamp}_${role}${extension}`, singleNameSet);
@@ -569,12 +789,16 @@ export async function processBeRealExport(
 
         let combinedBlob = await combineImages(baseBlob, overlayBlob, effectiveFormat);
         if (effectiveFormat === "jpg") {
-          combinedBlob = await addExifToJpeg(
+          const metadataResult = await addMetadataToJpeg(
             combinedBlob,
             candidate.takenAt,
             candidate.location,
             candidate.caption
           );
+          combinedBlob = metadataResult.blob;
+          if (!metadataResult.iptcEmbedded) {
+            iptcEmbeddingFailed = true;
+          }
         }
 
         const combinedName = getUniqueFilename(
@@ -627,6 +851,10 @@ export async function processBeRealExport(
   );
 
   emitProgress("complete", 1, 1, 100);
+
+  if (effectiveFormat === "jpg" && iptcEmbeddingFailed) {
+    warnings.push("Could not embed IPTC metadata for one or more JPG exports; EXIF metadata was still written.");
+  }
 
   const dedupedWarnings = Array.from(new Set(warnings));
   return {

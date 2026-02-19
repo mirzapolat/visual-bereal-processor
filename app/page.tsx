@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  extractExportDateBounds,
   processBeRealExport,
+  type ExportDateBounds,
   type ProcessorProgress,
   type ProcessorSettings
 } from "./lib/bereal-browser-processor";
@@ -10,6 +12,7 @@ import {
 type SettingsState = ProcessorSettings;
 
 type ToggleKey = "createCombinedImages" | "rearPhotoLarge";
+const DEFAULT_SHARE_BUTTON_TEXT = "Like this website? Share it with a friend!";
 
 const accentPalette = [
   { accent: "#1f4fd6", soft: "#e7eefb" },
@@ -68,8 +71,14 @@ export default function Home() {
   const [exportedCount, setExportedCount] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [progress, setProgress] = useState<ProcessorProgress>(initialProgress);
+  const [dateBounds, setDateBounds] = useState<ExportDateBounds | null>(null);
+  const [isDetectingDateBounds, setIsDetectingDateBounds] = useState(false);
+  const [shareButtonText, setShareButtonText] = useState(DEFAULT_SHARE_BUTTON_TEXT);
+  const dateBoundsRequestIdRef = useRef(0);
+  const shareButtonResetTimerRef = useRef<number | null>(null);
 
   const inputsDisabled = isProcessing;
+  const dateInputsDisabled = isProcessing || isDetectingDateBounds;
 
   const clearDownloadData = useCallback(() => {
     setDownloadUrl((previousUrl) => {
@@ -87,8 +96,22 @@ export default function Home() {
       if (downloadUrl) {
         URL.revokeObjectURL(downloadUrl);
       }
+      if (shareButtonResetTimerRef.current !== null) {
+        window.clearTimeout(shareButtonResetTimerRef.current);
+      }
     };
   }, [downloadUrl]);
+
+  const showLinkCopiedOnButton = useCallback(() => {
+    setShareButtonText("Link copied!");
+    if (shareButtonResetTimerRef.current !== null) {
+      window.clearTimeout(shareButtonResetTimerRef.current);
+    }
+    shareButtonResetTimerRef.current = window.setTimeout(() => {
+      setShareButtonText(DEFAULT_SHARE_BUTTON_TEXT);
+      shareButtonResetTimerRef.current = null;
+    }, 2200);
+  }, []);
 
   const toggle = (key: ToggleKey) => {
     if (inputsDisabled) return;
@@ -105,7 +128,10 @@ export default function Home() {
     };
 
   const handleFile = useCallback(
-    (newFile: File | null) => {
+    async (newFile: File | null) => {
+      const requestId = dateBoundsRequestIdRef.current + 1;
+      dateBoundsRequestIdRef.current = requestId;
+
       setFile(newFile);
       setError(null);
       setStatus(null);
@@ -114,6 +140,54 @@ export default function Home() {
       setExportedCount(null);
       setProgress(initialProgress);
       setIsProcessing(false);
+      setDateBounds(null);
+      setIsDetectingDateBounds(false);
+
+      if (!newFile) {
+        setSettings((previous) => ({
+          ...previous,
+          sinceDate: "",
+          endDate: ""
+        }));
+        return;
+      }
+
+      setIsDetectingDateBounds(true);
+      try {
+        const nextBounds = await extractExportDateBounds(newFile);
+        if (dateBoundsRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        if (!nextBounds) {
+          setSettings((previous) => ({
+            ...previous,
+            sinceDate: "",
+            endDate: ""
+          }));
+          return;
+        }
+
+        setDateBounds(nextBounds);
+        setSettings((previous) => ({
+          ...previous,
+          sinceDate: nextBounds.earliestDate,
+          endDate: nextBounds.latestDate
+        }));
+      } catch {
+        if (dateBoundsRequestIdRef.current !== requestId) {
+          return;
+        }
+        setSettings((previous) => ({
+          ...previous,
+          sinceDate: "",
+          endDate: ""
+        }));
+      } finally {
+        if (dateBoundsRequestIdRef.current === requestId) {
+          setIsDetectingDateBounds(false);
+        }
+      }
     },
     [clearDownloadData]
   );
@@ -125,7 +199,7 @@ export default function Home() {
       setDragging(false);
       const droppedFile = event.dataTransfer.files?.[0];
       if (droppedFile) {
-        handleFile(droppedFile);
+        void handleFile(droppedFile);
       }
     },
     [handleFile, inputsDisabled]
@@ -135,7 +209,7 @@ export default function Home() {
     (event: React.ChangeEvent<HTMLInputElement>) => {
       if (inputsDisabled) return;
       const newFile = event.target.files?.[0] ?? null;
-      handleFile(newFile);
+      void handleFile(newFile);
     },
     [handleFile, inputsDisabled]
   );
@@ -171,6 +245,25 @@ export default function Home() {
   }, []);
 
   const handleShareSite = useCallback(async () => {
+    const isLikelyMobile =
+      /Android|iPhone|iPod|Mobile|Windows Phone|Opera Mini|IEMobile/i.test(navigator.userAgent) ||
+      ((/iPad|Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1) ?? false);
+
+    if (!isLikelyMobile) {
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(window.location.href);
+          showLinkCopiedOnButton();
+          setStatus("Link copied to clipboard.");
+        } else {
+          setStatus("Copy the page URL to share with friends.");
+        }
+      } catch {
+        setStatus("Copy the page URL to share with friends.");
+      }
+      return;
+    }
+
     const shareData = {
       title: "BeReal Processor",
       text: "Export your BeReal memories in a photo-friendly format.",
@@ -188,6 +281,7 @@ export default function Home() {
     try {
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(window.location.href);
+        showLinkCopiedOnButton();
         setStatus("Link copied to clipboard.");
       } else {
         setStatus("Copy the page URL to share with friends.");
@@ -195,7 +289,7 @@ export default function Home() {
     } catch {
       setStatus("Copy the page URL to share with friends.");
     }
-  }, []);
+  }, [showLinkCopiedOnButton]);
 
   const handleExportToGallery = useCallback(async () => {
     if (!downloadBlob || !downloadName) return;
@@ -230,7 +324,7 @@ export default function Home() {
     }
 
     setIsProcessing(true);
-    setStatus("Processing your export locally in this browser…");
+    setStatus(null);
     setError(null);
     setWarnings([]);
     setExportedCount(null);
@@ -253,16 +347,7 @@ export default function Home() {
       setDownloadName(result.filename);
       setExportedCount(result.exportedCount);
       setWarnings(result.warnings);
-
-      if (result.warnings.length > 0) {
-        setStatus(
-          `Processing finished locally. ${result.exportedCount} images exported with ${result.warnings.length} warning${
-            result.warnings.length === 1 ? "" : "s"
-          }.`
-        );
-      } else {
-        setStatus(`Processing finished locally. ${result.exportedCount} images exported.`);
-      }
+      setStatus(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Local processing failed.";
       setError(message);
@@ -279,10 +364,12 @@ export default function Home() {
   return (
     <main>
       <header className="topbar">
-        <div>
-          <div className="logo">GDPR BeReal Processor</div>
+        <div className="brand-lockup">
+          <h1 className="logo">
+            BeReal Gallery <span>Backup</span>
+          </h1>
           <p className="tagline">
-            Convert your BeReal export directly in your browser. No Python and no server-side upload needed.
+            Process your BeReal export so you can back them up in your phone&apos;s gallery.
           </p>
         </div>
         <a
@@ -307,7 +394,7 @@ export default function Home() {
                 <path d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 15h14v4H5v-4z" />
               </svg>
             </span>
-            Step 1 · Upload your export
+            Step 1 · Upload
           </h2>
           <button
             className="help-button"
@@ -322,6 +409,7 @@ export default function Home() {
         <p>Drag and drop the BeReal export zip, or browse your files.</p>
         {showExportHelp ? (
           <div id="export-help" className="help-panel">
+            <p className="help-panel-title">In the BeReal app:</p>
             <ol>
               <li>Open BeReal and go to Settings.</li>
               <li>Follow: Help → Contact → Ask a Question → Guidelines → Everything else → More Help.</li>
@@ -352,7 +440,7 @@ export default function Home() {
                 onClick={(event) => {
                   event.stopPropagation();
                   if (inputsDisabled) return;
-                  handleFile(null);
+                  void handleFile(null);
                 }}
                 aria-label="Remove uploaded file"
                 disabled={inputsDisabled}
@@ -407,6 +495,13 @@ export default function Home() {
             </div>
 
             <div className="date-filters">
+              {isDetectingDateBounds ? (
+                <p className="date-range-hint">Reading available dates from your export…</p>
+              ) : dateBounds ? (
+                <p className="date-range-hint">
+                  Available range: {dateBounds.earliestDate} to {dateBounds.latestDate}
+                </p>
+              ) : null}
               <div className="field">
                 <label htmlFor="since-date">Start date filter</label>
                 <input
@@ -414,7 +509,9 @@ export default function Home() {
                   className="date-input"
                   type="date"
                   value={settings.sinceDate}
-                  disabled={inputsDisabled}
+                  min={dateBounds?.earliestDate}
+                  max={settings.endDate || dateBounds?.latestDate}
+                  disabled={dateInputsDisabled}
                   onChange={(event) =>
                     setSettings((previous) => ({
                       ...previous,
@@ -430,7 +527,9 @@ export default function Home() {
                   className="date-input"
                   type="date"
                   value={settings.endDate}
-                  disabled={inputsDisabled}
+                  min={settings.sinceDate || dateBounds?.earliestDate}
+                  max={dateBounds?.latestDate}
+                  disabled={dateInputsDisabled}
                   onChange={(event) =>
                     setSettings((previous) => ({
                       ...previous,
@@ -456,7 +555,6 @@ export default function Home() {
               >
                 <option value="jpg">JPG (JPEG)</option>
                 <option value="png">PNG</option>
-                <option value="heic">HEIC (falls back to JPG in browser mode)</option>
               </select>
             </div>
           </section>
@@ -472,9 +570,13 @@ export default function Home() {
             </h2>
             <div className="process-layout">
               <div className="process-left">
-                {!downloadUrl ? (
-                  <button className="primary-action" onClick={handleSubmit} disabled={isProcessing}>
-                    {isProcessing ? "Processing…" : "Process locally"}
+                {!downloadUrl && !isProcessing ? (
+                  <button
+                    className="primary-action"
+                    onClick={handleSubmit}
+                    disabled={isProcessing || isDetectingDateBounds}
+                  >
+                    {isDetectingDateBounds ? "Reading dates…" : "Process locally"}
                   </button>
                 ) : null}
 
@@ -536,8 +638,8 @@ export default function Home() {
                 ) : null}
               </div>
 
-              <div className="process-right">
-                {downloadUrl ? (
+              {downloadUrl ? (
+                <div className="process-right">
                   <div className="result-card">
                     <div className="result-title">Export ready</div>
                     {exportedCount !== null ? (
@@ -563,17 +665,12 @@ export default function Home() {
                         Save to Phone Gallery
                       </button>
                       <button className="share-text" type="button" onClick={handleShareSite}>
-                        Like this website? Share it with a friend!
+                        {shareButtonText}
                       </button>
                     </div>
                   </div>
-                ) : (
-                  <div className="result-card placeholder">
-                    <div className="result-title">Export actions</div>
-                    <p>Start processing to unlock download and sharing options.</p>
-                  </div>
-                )}
-              </div>
+                </div>
+              ) : null}
             </div>
           </section>
         </>
@@ -589,8 +686,8 @@ export default function Home() {
           Privacy
         </h2>
         <p>
-          Everything runs inside your browser on your device. Your zip is processed locally and is not uploaded to a
-          server by this app.
+          All processing happens locally on your device in this browser, and your files are not uploaded to any server
+          by this app.
         </p>
       </section>
 
