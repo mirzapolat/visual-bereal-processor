@@ -68,9 +68,9 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
       { url: "/favicon.ico" },
-      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
-      { url: "/favicon.svg", type: "image/svg+xml" }
+      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" }
     ],
     apple: [
       {
@@ -102,7 +102,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={sans.variable}>{children}</body>
+      <body className={sans.variable} data-app-ready="false" style={{ opacity: 0 }}>
+        <noscript>
+          <style>{`body{opacity:1 !important;}`}</style>
+        </noscript>
+        {children}
+      </body>
     </html>
   );
 }

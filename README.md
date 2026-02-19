@@ -1,40 +1,40 @@
-# BeReal Photo Processor (Browser-Local)
+# BeReal Gallery Backup
 
-Process a BeReal GDPR export zip directly in your browser with no Python installation.
+BeReal Gallery Backup is a browser-local web app that converts your BeReal export zip into gallery-ready images and gives you a downloadable processed zip.
 
-## What it does
-- Reads your BeReal export zip (`posts.json` + `Photos/`) locally in the browser.
-- Converts source images to JPG or PNG.
-- Renames files with capture timestamps.
-- Applies date filters.
-- Creates combined memory-style images (optional).
-- Adds EXIF and IPTC metadata for JPG outputs (capture date and caption, plus GPS in EXIF).
-- Downloads a processed zip archive.
+## App
+- Upload your BeReal export zip.
+- Auto-detect available date range and filter by start/end date.
+- Export as JPG or PNG.
+- Create combined memory-style images, or export singles.
+- Keep capture metadata in JPG exports (EXIF/IPTC when available).
+- Process files locally in your browser.
 
-## Notes
-- JPG output includes both EXIF and IPTC metadata when possible.
+## Deploy
 
-## Run locally
+### Local
 ```bash
 npm install
 npm run dev
 ```
+Open [http://localhost:3000](http://localhost:3000).
 
-Open [http://localhost:3000](http://localhost:3000) and upload your BeReal export zip.
-
-## Production build
+### Production (Node)
 ```bash
+npm install
 npm run build
 npm run start
 ```
 
-## Docker
+### Docker
 ```bash
 docker build -t visual-bereal-processor .
 docker run --rm -p 3000:3000 visual-bereal-processor
 ```
 
-Then open [http://localhost:3000](http://localhost:3000).
-
-## Credits
-Originally forked from [hatobi/bereal-gdpr-photo-toolkit](https://github.com/hatobi/bereal-gdpr-photo-toolkit) and then adapted to a browser-native TypeScript implementation.
+### Vercel
+```bash
+npm install
+npx vercel
+npx vercel --prod
+```

@@ -59,6 +59,7 @@ const initialProgress: ProcessorProgress = {
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
+  const [uploadAnimationTick, setUploadAnimationTick] = useState(0);
   const [settings, setSettings] = useState<SettingsState>(initialSettings);
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -76,6 +77,19 @@ export default function Home() {
   const [shareButtonText, setShareButtonText] = useState(DEFAULT_SHARE_BUTTON_TEXT);
   const dateBoundsRequestIdRef = useRef(0);
   const shareButtonResetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const { body } = document;
+    const animationFrame = window.requestAnimationFrame(() => {
+      body.style.transition = "opacity 320ms cubic-bezier(0.22, 1, 0.36, 1)";
+      body.style.opacity = "1";
+      body.dataset.appReady = "true";
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, []);
 
   const inputsDisabled = isProcessing;
   const dateInputsDisabled = isProcessing || isDetectingDateBounds;
@@ -133,6 +147,9 @@ export default function Home() {
       dateBoundsRequestIdRef.current = requestId;
 
       setFile(newFile);
+      if (newFile) {
+        setUploadAnimationTick((previous) => previous + 1);
+      }
       setError(null);
       setStatus(null);
       setWarnings([]);
@@ -362,8 +379,8 @@ export default function Home() {
   }, [clearDownloadData, file, settings]);
 
   return (
-    <main>
-      <header className="topbar">
+    <main className="page-shell">
+      <header className="topbar stage-fade stage-fade-delay-1">
         <div className="brand-lockup">
           <h1 className="logo">
             BeReal Gallery <span>Backup</span>
@@ -379,25 +396,25 @@ export default function Home() {
           rel="noreferrer"
           aria-label="View on GitHub"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
             <path d="M12 .5C5.65.5.5 5.78.5 12.3c0 5.22 3.44 9.65 8.2 11.21.6.12.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.75-4.04-1.65-4.04-1.65-.55-1.42-1.34-1.8-1.34-1.8-1.1-.78.08-.77.08-.77 1.22.09 1.86 1.27 1.86 1.27 1.08 1.92 2.84 1.37 3.53 1.05.11-.8.42-1.37.76-1.68-2.66-.31-5.46-1.35-5.46-6.03 0-1.34.46-2.43 1.24-3.29-.12-.31-.54-1.58.12-3.28 0 0 1.01-.33 3.3 1.26.96-.27 1.98-.4 3-.41 1.02.01 2.04.14 3 .41 2.29-1.59 3.3-1.26 3.3-1.26.66 1.7.24 2.97.12 3.28.78.86 1.24 1.95 1.24 3.29 0 4.69-2.81 5.72-5.49 6.02.43.38.81 1.14.81 2.3 0 1.66-.02 3-.02 3.41 0 .32.22.71.82.58 4.76-1.56 8.2-6 8.2-11.21C23.5 5.78 18.35.5 12 .5z" />
           </svg>
           <span className="sr-only">GitHub</span>
         </a>
       </header>
 
-      <section className="card">
+      <section className="card stage-fade stage-fade-delay-2">
         <div className="step-header">
           <h2>
             <span className="heading-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
+              <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
                 <path d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 15h14v4H5v-4z" />
               </svg>
             </span>
             Step 1 · Upload
           </h2>
           <button
-            className="help-button"
+            className="help-button pressable"
             type="button"
             onClick={() => setShowExportHelp((previous) => !previous)}
             aria-expanded={showExportHelp}
@@ -408,7 +425,7 @@ export default function Home() {
         </div>
         <p>Drag and drop the BeReal export zip, or browse your files.</p>
         {showExportHelp ? (
-          <div id="export-help" className="help-panel">
+          <div id="export-help" className="help-panel section-enter">
             <p className="help-panel-title">In the BeReal app:</p>
             <ol>
               <li>Open BeReal and go to Settings.</li>
@@ -419,7 +436,7 @@ export default function Home() {
           </div>
         ) : null}
         <label
-          className={`dropzone ${dragging ? "dragging" : ""} ${inputsDisabled ? "disabled" : ""}`}
+          className={`dropzone ${dragging ? "dragging" : ""} ${file ? `uploaded upload-flash-${uploadAnimationTick % 2}` : ""} ${inputsDisabled ? "disabled" : ""}`}
           onDragOver={(event) => {
             event.preventDefault();
             if (inputsDisabled) return;
@@ -432,10 +449,13 @@ export default function Home() {
           <strong>{file ? "Replace zip" : "Choose zip file"}</strong>
           <p>Upload the original exported .zip you got from BeReal</p>
           {file ? (
-            <span className="file-pill">
+            <span
+              key={`${file.name}-${file.size}-${file.lastModified}-${uploadAnimationTick}`}
+              className="file-pill file-pill-enter"
+            >
               {file.name} · {formattedSize}
               <button
-                className="file-clear"
+                className="file-clear pressable"
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -454,10 +474,10 @@ export default function Home() {
 
       {file ? (
         <>
-          <section className="card" style={{ marginTop: 24 }}>
+          <section className="card section-enter section-enter-delay-1" style={{ marginTop: 24 }}>
             <h2 style={{ marginBottom: 12 }}>
               <span className="heading-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
+                <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
                   <path d="M4 7h10v2H4V7zm0 8h16v2H4v-2zm0-4h16v2H4v-2zm12-4h4v2h-4V7z" />
                 </svg>
               </span>
@@ -497,10 +517,6 @@ export default function Home() {
             <div className="date-filters">
               {isDetectingDateBounds ? (
                 <p className="date-range-hint">Reading available dates from your export…</p>
-              ) : dateBounds ? (
-                <p className="date-range-hint">
-                  Available range: {dateBounds.earliestDate} to {dateBounds.latestDate}
-                </p>
               ) : null}
               <div className="field">
                 <label htmlFor="since-date">Start date filter</label>
@@ -559,10 +575,10 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="card" style={{ marginTop: 24 }}>
+          <section className="card section-enter section-enter-delay-2" style={{ marginTop: 24 }}>
             <h2 style={{ marginBottom: 12 }}>
               <span className="heading-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
+                <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
                   <path d="M5 4h14v2H5V4zm0 4h8v2H5V8zm0 6h14v2H5v-2zm0 4h10v2H5v-2z" />
                 </svg>
               </span>
@@ -572,7 +588,7 @@ export default function Home() {
               <div className="process-left">
                 {!downloadUrl && !isProcessing ? (
                   <button
-                    className="primary-action"
+                    className="primary-action pressable"
                     onClick={handleSubmit}
                     disabled={isProcessing || isDetectingDateBounds}
                   >
@@ -581,10 +597,13 @@ export default function Home() {
                 ) : null}
 
                 {isProcessing ? (
-                  <div className="progress">
+                  <div className="progress progress-active section-enter">
                     <div className="progress-meta">
-                      <span>{progressLabel}</span>
-                      <span>{progress.percent}%</span>
+                      <span className="progress-label">
+                        <span className="progress-orb" aria-hidden="true" />
+                        {progressLabel}
+                      </span>
+                      <span className="progress-percent">{progress.percent}%</span>
                     </div>
                     <div
                       className="progress-track"
@@ -600,13 +619,13 @@ export default function Home() {
                 ) : null}
 
                 {status ? (
-                  <div className="status" style={{ marginTop: 16 }}>
+                  <div className="status status-enter" style={{ marginTop: 16 }}>
                     {status}
                   </div>
                 ) : null}
                 {error ? (
                   <div
-                    className="status"
+                    className="status status-enter"
                     style={{
                       marginTop: 16,
                       background: "#fef2f2",
@@ -619,7 +638,7 @@ export default function Home() {
                 ) : null}
                 {warnings.length > 0 ? (
                   <div
-                    className="status"
+                    className="status status-enter"
                     style={{
                       marginTop: 16,
                       background: "#fff7ed",
@@ -639,8 +658,8 @@ export default function Home() {
               </div>
 
               {downloadUrl ? (
-                <div className="process-right">
-                  <div className="result-card">
+                <div className="process-right section-enter section-enter-delay-1">
+                  <div className="result-card result-card-ready">
                     <div className="result-title">Export ready</div>
                     {exportedCount !== null ? (
                       <div className="exported-count">
@@ -648,23 +667,27 @@ export default function Home() {
                       </div>
                     ) : null}
                     <div className="actions actions-vertical">
-                      <a className="download" href={downloadUrl} download={downloadName ?? "bereal-processed.zip"}>
+                      <a
+                        className="download pressable"
+                        href={downloadUrl}
+                        download={downloadName ?? "bereal-processed.zip"}
+                      >
                         <span className="button-icon" aria-hidden="true">
-                          <svg viewBox="0 0 24 24">
+                          <svg viewBox="0 0 24 24" width="18" height="18" focusable="false">
                             <path d="M12 3v10l3.5-3.5 1.4 1.4L12 16.8 7.1 10.9l1.4-1.4L11 13V3h1zM5 19h14v2H5v-2z" />
                           </svg>
                         </span>
                         Download zip
                       </a>
-                      <button className="action-button" type="button" onClick={handleExportToGallery}>
+                      <button className="action-button pressable" type="button" onClick={handleExportToGallery}>
                         <span className="button-icon" aria-hidden="true">
-                          <svg viewBox="0 0 24 24">
+                          <svg viewBox="0 0 24 24" width="18" height="18" focusable="false">
                             <path d="M5 5h14v10H5V5zm2 2v6h10V7H7zm-2 10h14v2H5v-2zm4-6 2-2 3 3 2-2 3 3H7z" />
                           </svg>
                         </span>
                         Save to Phone Gallery
                       </button>
-                      <button className="share-text" type="button" onClick={handleShareSite}>
+                      <button className="share-text pressable-subtle" type="button" onClick={handleShareSite}>
                         {shareButtonText}
                       </button>
                     </div>
@@ -676,10 +699,10 @@ export default function Home() {
         </>
       ) : null}
 
-      <section className="card" style={{ marginTop: 24 }}>
+      <section className="card stage-fade stage-fade-delay-3" style={{ marginTop: 24 }}>
         <h2>
           <span className="heading-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
+            <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
               <path d="M12 3l7 4v5c0 4.4-3 8.4-7 9-4-0.6-7-4.6-7-9V7l7-4zm0 4.1L7 8.9v3.1c0 3.2 2 6.3 5 6.9 3-0.6 5-3.7 5-6.9V8.9l-5-1.8z" />
             </svg>
           </span>
@@ -691,7 +714,7 @@ export default function Home() {
         </p>
       </section>
 
-      <footer className="footer">
+      <footer className="footer stage-fade stage-fade-delay-4">
         <span>Created with ❤️ by Mirza Polat</span>
       </footer>
     </main>
