@@ -1143,3 +1143,11 @@ select {
   letter-spacing: 0.02em;
   text-align: center;
 }
+
+.footer-disclaimer {
+  margin-top: 8px;
+  margin-inline: auto;
+  max-width: 640px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}

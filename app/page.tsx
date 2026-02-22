@@ -67,6 +67,7 @@ export default function Home() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadBlob, setDownloadBlob] = useState<Blob | null>(null);
   const [downloadName, setDownloadName] = useState<string | null>(null);
+  const [galleryShareFiles, setGalleryShareFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showExportHelp, setShowExportHelp] = useState(false);
   const [exportedCount, setExportedCount] = useState<number | null>(null);
@@ -103,6 +104,7 @@ export default function Home() {
     });
     setDownloadBlob(null);
     setDownloadName(null);
+    setGalleryShareFiles([]);
   }, []);
 
   useEffect(() => {
@@ -309,7 +311,10 @@ export default function Home() {
   }, [showLinkCopiedOnButton]);
 
   const handleExportToGallery = useCallback(async () => {
-    if (!downloadBlob || !downloadName) return;
+    if (galleryShareFiles.length === 0) {
+      setStatus("No exported photos are ready to share yet.");
+      return;
+    }
     if (!navigator.share) {
       setStatus("Sharing files is not supported on this device.");
       return;
@@ -317,14 +322,13 @@ export default function Home() {
 
     setStatus("Preparing files for sharing…");
     try {
-      const preparedFile = new File([downloadBlob], downloadName, { type: "application/zip" });
-      if (navigator.canShare && !navigator.canShare({ files: [preparedFile] })) {
+      if (navigator.canShare && !navigator.canShare({ files: galleryShareFiles })) {
         setStatus("Sharing files is not supported on this device.");
         return;
       }
       await navigator.share({
         title: "BeReal memories",
-        files: [preparedFile]
+        files: galleryShareFiles
       });
       setStatus("Share sheet opened.");
     } catch (err) {
@@ -332,7 +336,7 @@ export default function Home() {
       setError(message);
       setStatus(null);
     }
-  }, [downloadBlob, downloadName]);
+  }, [galleryShareFiles]);
 
   const handleSubmit = useCallback(async () => {
     if (!file) {
@@ -359,9 +363,16 @@ export default function Home() {
       });
 
       const objectUrl = URL.createObjectURL(result.blob);
+      const shareFiles = result.shareFiles.map(
+        (exportFile) =>
+          new File([exportFile.blob], exportFile.name, {
+            type: exportFile.blob.type || (result.effectiveFormat === "png" ? "image/png" : "image/jpeg")
+          })
+      );
       setDownloadUrl(objectUrl);
       setDownloadBlob(result.blob);
       setDownloadName(result.filename);
+      setGalleryShareFiles(shareFiles);
       setExportedCount(result.exportedCount);
       setWarnings(result.warnings);
       setStatus(null);
@@ -371,6 +382,7 @@ export default function Home() {
       setStatus(null);
       setDownloadBlob(null);
       setDownloadName(null);
+      setGalleryShareFiles([]);
       setWarnings([]);
       setExportedCount(null);
     } finally {
@@ -716,6 +728,9 @@ export default function Home() {
 
       <footer className="footer stage-fade stage-fade-delay-4">
         <span>Created with ❤️ by Mirza Polat</span>
+        <p className="footer-disclaimer">
+          Independent tool. This app is not affiliated with, approved by, or linked to BeReal.
+        </p>
       </footer>
     </main>
   );

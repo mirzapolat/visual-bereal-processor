@@ -2,6 +2,8 @@
 
 BeReal Gallery Backup is a browser-local web app that converts your BeReal export zip into gallery-ready images and gives you a downloadable processed zip.
 
+Note: This is an independent project and is not affiliated with, approved by, or linked to BeReal.
+
 ## App
 - Upload your BeReal export zip.
 - Auto-detect available date range and filter by start/end date.

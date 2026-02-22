@@ -22,6 +22,7 @@ export type ProcessorResult = {
   exportedCount: number;
   warnings: string[];
   effectiveFormat: "jpg" | "png";
+  shareFiles: ProcessedExportFile[];
 };
 
 export type ExportDateBounds = {
@@ -51,14 +52,14 @@ type ParsedPost = {
   takenAt: Date;
 };
 
-type OutputFile = {
+export type ProcessedExportFile = {
   name: string;
   blob: Blob;
 };
 
 type ProcessedPair = {
-  primary: OutputFile;
-  secondary: OutputFile;
+  primary: ProcessedExportFile;
+  secondary: ProcessedExportFile;
   takenAt: Date;
   location?: { latitude: number; longitude: number };
   caption?: string;
@@ -699,7 +700,7 @@ export async function processBeRealExport(
     filteredPosts.push({ entry, takenAt });
   }
 
-  const processedSingles: OutputFile[] = [];
+  const processedSingles: ProcessedExportFile[] = [];
   const combineCandidates: ProcessedPair[] = [];
   const singleNameSet = new Set<string>();
 
@@ -743,8 +744,8 @@ export async function processBeRealExport(
       continue;
     }
 
-    let primaryFile: OutputFile | null = null;
-    let secondaryFile: OutputFile | null = null;
+    let primaryFile: ProcessedExportFile | null = null;
+    let secondaryFile: ProcessedExportFile | null = null;
 
     for (const role of ["primary", "secondary"] as const) {
       try {
@@ -793,7 +794,7 @@ export async function processBeRealExport(
     );
   }
 
-  const combinedFiles: OutputFile[] = [];
+  const combinedFiles: ProcessedExportFile[] = [];
   if (settings.createCombinedImages) {
     const combinedNameSet = new Set<string>();
     emitProgress("combining", 0, combineCandidates.length, 80);
@@ -881,6 +882,7 @@ export async function processBeRealExport(
     filename: `${exportBaseName}.zip`,
     exportedCount: exportFiles.length,
     warnings: dedupedWarnings,
-    effectiveFormat
+    effectiveFormat,
+    shareFiles: [...exportFiles]
   };
 }
