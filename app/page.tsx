@@ -47,7 +47,9 @@ const initialSettings: SettingsState = {
   createCombinedImages: true,
   rearPhotoLarge: true,
   sinceDate: "",
-  endDate: ""
+  endDate: "",
+  fallbackTimezone: "",
+  timezoneOverrides: []
 };
 
 const initialProgress: ProcessorProgress = {
@@ -55,6 +57,30 @@ const initialProgress: ProcessorProgress = {
   current: 0,
   total: 0,
   percent: 0
+};
+
+const getSupportedTimeZones = () => {
+  const intlWithSupportedValues = Intl as typeof Intl & {
+    supportedValuesOf?: (key: "timeZone") => string[];
+  };
+
+  const supportedValuesOf = intlWithSupportedValues.supportedValuesOf;
+  if (!supportedValuesOf) {
+    return ["UTC"];
+  }
+
+  try {
+    const zones = supportedValuesOf("timeZone");
+    const deduped = new Set<string>(["UTC", ...zones]);
+    return [...deduped].sort((left, right) => {
+      if (left === right) return 0;
+      if (left === "UTC") return -1;
+      if (right === "UTC") return 1;
+      return left.localeCompare(right);
+    });
+  } catch {
+    return ["UTC"];
+  }
 };
 
 export default function Home() {
@@ -70,6 +96,7 @@ export default function Home() {
   const [galleryShareFiles, setGalleryShareFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showExportHelp, setShowExportHelp] = useState(false);
+  const [showTimezoneOverrides, setShowTimezoneOverrides] = useState(false);
   const [exportedCount, setExportedCount] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [progress, setProgress] = useState<ProcessorProgress>(initialProgress);
@@ -78,6 +105,54 @@ export default function Home() {
   const [shareButtonText, setShareButtonText] = useState(DEFAULT_SHARE_BUTTON_TEXT);
   const dateBoundsRequestIdRef = useRef(0);
   const shareButtonResetTimerRef = useRef<number | null>(null);
+  const fallbackTimezoneOptions = useMemo(() => {
+    const zones = getSupportedTimeZones();
+    if (!settings.fallbackTimezone || zones.includes(settings.fallbackTimezone)) {
+      return zones;
+    }
+
+    return [settings.fallbackTimezone, ...zones].sort((left, right) => {
+      if (left === right) return 0;
+      if (left === settings.fallbackTimezone) return -1;
+      if (right === settings.fallbackTimezone) return 1;
+      if (left === "UTC") return -1;
+      if (right === "UTC") return 1;
+      return left.localeCompare(right);
+    });
+  }, [settings.fallbackTimezone]);
+
+  const addTimezoneOverride = useCallback(() => {
+    setSettings((previous) => ({
+      ...previous,
+      timezoneOverrides: [
+        ...previous.timezoneOverrides,
+        {
+          startDate: "",
+          endDate: "",
+          timeZone: ""
+        }
+      ]
+    }));
+  }, []);
+
+  const updateTimezoneOverride = useCallback(
+    (index: number, patch: Partial<SettingsState["timezoneOverrides"][number]>) => {
+      setSettings((previous) => ({
+        ...previous,
+        timezoneOverrides: previous.timezoneOverrides.map((override, overrideIndex) =>
+          overrideIndex === index ? { ...override, ...patch } : override
+        )
+      }));
+    },
+    []
+  );
+
+  const removeTimezoneOverride = useCallback((index: number) => {
+    setSettings((previous) => ({
+      ...previous,
+      timezoneOverrides: previous.timezoneOverrides.filter((_, overrideIndex) => overrideIndex !== index)
+    }));
+  }, []);
 
   useEffect(() => {
     const { body } = document;
@@ -90,6 +165,21 @@ export default function Home() {
     return () => {
       window.cancelAnimationFrame(animationFrame);
     };
+  }, []);
+
+  useEffect(() => {
+    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!browserTimezone) {
+      return;
+    }
+    setSettings((previous) =>
+      previous.fallbackTimezone
+        ? previous
+        : {
+            ...previous,
+            fallbackTimezone: browserTimezone
+          }
+    );
   }, []);
 
   const inputsDisabled = isProcessing;
@@ -567,6 +657,7 @@ export default function Home() {
                 />
               </div>
             </div>
+
             <div className="field">
               <label htmlFor="export-format">Export file format</label>
               <select
@@ -591,10 +682,164 @@ export default function Home() {
             <h2 style={{ marginBottom: 12 }}>
               <span className="heading-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
+                  <path d="M12 1.75a10.25 10.25 0 1 0 10.25 10.25A10.26 10.26 0 0 0 12 1.75zm.75 5.5h-1.5v5.06l3.83 2.3.77-1.29-3.1-1.86z" />
+                </svg>
+              </span>
+              Step 3 · Timezone settings
+            </h2>
+            <div className="field">
+              <label htmlFor="fallback-timezone">Fallback timezone (for photos without location)</label>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  gap: 10,
+                  alignItems: "center"
+                }}
+              >
+                <select
+                  id="fallback-timezone"
+                  className="date-input"
+                  value={settings.fallbackTimezone}
+                  disabled={inputsDisabled}
+                  onChange={(event) =>
+                    setSettings((previous) => ({
+                      ...previous,
+                      fallbackTimezone: event.target.value
+                    }))
+                  }
+                >
+                  <option value="">Select a fallback timezone</option>
+                  {fallbackTimezoneOptions.map((timeZone) => (
+                    <option key={timeZone} value={timeZone}>
+                      {timeZone}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="help-button pressable"
+                  disabled={inputsDisabled}
+                  onClick={() => {
+                    setShowTimezoneOverrides((previous) => !previous);
+                  }}
+                  aria-expanded={showTimezoneOverrides}
+                  aria-controls="timezone-overrides-panel"
+                >
+                  {showTimezoneOverrides ? "Close" : "Set Timespans"}
+                </button>
+              </div>
+              {showTimezoneOverrides ? (
+                <div
+                  id="timezone-overrides-panel"
+                  className="help-panel section-enter"
+                  style={{ marginTop: 12 }}
+                >
+                  <p className="help-panel-title">Fallback timezone timespans</p>
+                  <p style={{ marginTop: 0, marginBottom: 12 }}>
+                    Only used when a photo has no location in <code>posts.json</code>. Later entries override earlier
+                    ones if date ranges overlap.
+                  </p>
+                  {settings.timezoneOverrides.length === 0 ? (
+                    <p style={{ marginBottom: 12 }}>No timespans added yet.</p>
+                  ) : null}
+                  <div className="timezone-overrides-list">
+                    {settings.timezoneOverrides.map((override, index) => (
+                      <div key={index} className="timezone-override-card">
+                        <div className="timezone-override-grid">
+                          <div className="timezone-override-field">
+                            <label className="timezone-override-label" htmlFor={`tz-span-start-${index}`}>
+                              Start
+                            </label>
+                            <input
+                              id={`tz-span-start-${index}`}
+                              className="date-input"
+                              type="date"
+                              value={override.startDate}
+                              max={override.endDate || undefined}
+                              disabled={inputsDisabled}
+                              onChange={(event) =>
+                                updateTimezoneOverride(index, { startDate: event.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="timezone-override-field">
+                            <label className="timezone-override-label" htmlFor={`tz-span-end-${index}`}>
+                              End
+                            </label>
+                            <input
+                              id={`tz-span-end-${index}`}
+                              className="date-input"
+                              type="date"
+                              value={override.endDate}
+                              min={override.startDate || undefined}
+                              disabled={inputsDisabled}
+                              onChange={(event) =>
+                                updateTimezoneOverride(index, { endDate: event.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="timezone-override-field timezone-override-field-zone">
+                            <label className="timezone-override-label" htmlFor={`tz-span-zone-${index}`}>
+                              Timezone
+                            </label>
+                            <select
+                              id={`tz-span-zone-${index}`}
+                              className="date-input"
+                              value={override.timeZone}
+                              disabled={inputsDisabled}
+                              onChange={(event) =>
+                                updateTimezoneOverride(index, { timeZone: event.target.value })
+                              }
+                            >
+                              <option value="">Select timezone</option>
+                              {fallbackTimezoneOptions.map((timeZone) => (
+                                <option key={timeZone} value={timeZone}>
+                                  {timeZone}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            type="button"
+                            className="timezone-override-remove pressable-subtle"
+                            disabled={inputsDisabled}
+                            aria-label={`Remove timezone timespan ${index + 1}`}
+                            onClick={() => {
+                              removeTimezoneOverride(index);
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9zm1 12h8a2 2 0 0 0 2-2V8H6v11a2 2 0 0 0 2 2z" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="help-button pressable"
+                      disabled={inputsDisabled}
+                      onClick={addTimezoneOverride}
+                    >
+                      Add timespan
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="card section-enter section-enter-delay-3" style={{ marginTop: 24 }}>
+            <h2 style={{ marginBottom: 12 }}>
+              <span className="heading-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
                   <path d="M5 4h14v2H5V4zm0 4h8v2H5V8zm0 6h14v2H5v-2zm0 4h10v2H5v-2z" />
                 </svg>
               </span>
-              Step 3 · Process & export
+              Step 4 · Process & export
             </h2>
             <div className="process-layout">
               <div className="process-left">

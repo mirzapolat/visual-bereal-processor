@@ -77,6 +77,10 @@ main {
   animation-delay: 130ms;
 }
 
+.section-enter-delay-3 {
+  animation-delay: 190ms;
+}
+
 h1,
 h2,
 h3 {
@@ -614,6 +618,95 @@ select {
   box-shadow: var(--focus);
 }
 
+.timezone-overrides-list {
+  display: grid;
+  gap: 10px;
+}
+
+.timezone-override-card {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  padding: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.9)),
+    radial-gradient(circle at top right, rgba(31, 79, 214, 0.08), transparent 58%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.timezone-override-grid {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.timezone-override-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timezone-override-field-zone select {
+  min-width: 0;
+}
+
+.timezone-override-label {
+  font-size: 0.72rem;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--muted) 78%, var(--ink));
+  margin: 0;
+}
+
+.timezone-override-field .date-input {
+  padding-block: 9px;
+}
+
+.timezone-override-remove {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  background: rgba(254, 242, 242, 0.9);
+  color: #dc2626;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: end;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.timezone-override-remove svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.timezone-override-remove:hover:not(:disabled) {
+  background: rgba(254, 226, 226, 0.95);
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #b91c1c;
+  box-shadow:
+    0 0 0 4px rgba(220, 38, 38, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.timezone-override-remove:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(220, 38, 38, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.timezone-override-remove:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .primary-action {
   width: 100%;
   padding: 14px 18px;
@@ -1125,12 +1218,25 @@ select {
   .toggle .switch {
     margin-left: auto;
   }
+
+  .timezone-override-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timezone-override-remove {
+    justify-self: end;
+  }
 }
 
 @media (min-width: 900px) {
   .date-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: end;
+  }
+
+  .timezone-override-grid {
+    grid-template-columns: minmax(148px, 0.9fr) minmax(148px, 0.9fr) minmax(260px, 1.7fr) auto;
+    gap: 8px;
   }
 }
 

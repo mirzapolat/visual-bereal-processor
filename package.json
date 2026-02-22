@@ -12,7 +12,8 @@
     "next": "^14.2.5",
     "piexifjs": "^1.0.6",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tz-lookup": "^6.1.25"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
