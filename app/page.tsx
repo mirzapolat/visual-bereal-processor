@@ -430,7 +430,7 @@ export default function Home() {
 
   const handleSubmit = useCallback(async () => {
     if (!file) {
-      setError("Please upload your BeReal export zip file first.");
+      setError("Please select your BeReal export zip file first.");
       return;
     }
 
@@ -506,6 +506,21 @@ export default function Home() {
       </header>
 
       <section className="card stage-fade stage-fade-delay-2">
+        <h2>
+          <span className="heading-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
+              <path d="M12 3l7 4v5c0 4.4-3 8.4-7 9-4-0.6-7-4.6-7-9V7l7-4zm0 4.1L7 8.9v3.1c0 3.2 2 6.3 5 6.9 3-0.6 5-3.7 5-6.9V8.9l-5-1.8z" />
+            </svg>
+          </span>
+          Privacy
+        </h2>
+        <p>
+          All processing happens locally on your device in this browser, and your files are not uploaded to any server
+          by this app.
+        </p>
+      </section>
+
+      <section className="card stage-fade stage-fade-delay-3" style={{ marginTop: 24 }}>
         <div className="step-header">
           <h2>
             <span className="heading-icon" aria-hidden="true">
@@ -513,7 +528,7 @@ export default function Home() {
                 <path d="M12 3l4 4h-3v6h-2V7H8l4-4zM5 15h14v4H5v-4z" />
               </svg>
             </span>
-            Step 1 · Upload
+            Step 1 · Select
           </h2>
           <button
             className="help-button pressable"
@@ -533,7 +548,7 @@ export default function Home() {
               <li>Open BeReal and go to Settings.</li>
               <li>Follow: Help → Contact → Ask a Question → Guidelines → Everything else → More Help.</li>
               <li>Select “I want a copy of my data”.</li>
-              <li>Download the zip when it arrives, then upload it here.</li>
+              <li>Download the zip when it arrives, then select it here.</li>
             </ol>
           </div>
         ) : null}
@@ -549,7 +564,7 @@ export default function Home() {
         >
           <input type="file" accept=".zip" onChange={onBrowse} disabled={inputsDisabled} />
           <strong>{file ? "Replace zip" : "Choose zip file"}</strong>
-          <p>Upload the original exported .zip you got from BeReal</p>
+          <p>Select the original exported .zip you got from BeReal</p>
           {file ? (
             <span
               key={`${file.name}-${file.size}-${file.lastModified}-${uploadAnimationTick}`}
@@ -564,7 +579,7 @@ export default function Home() {
                   if (inputsDisabled) return;
                   void handleFile(null);
                 }}
-                aria-label="Remove uploaded file"
+                aria-label="Remove selected file"
                 disabled={inputsDisabled}
               >
                 x
@@ -583,7 +598,7 @@ export default function Home() {
                   <path d="M4 7h10v2H4V7zm0 8h16v2H4v-2zm0-4h16v2H4v-2zm12-4h4v2h-4V7z" />
                 </svg>
               </span>
-              Step 2 · Adjust settings
+              Step 2 · Export Settings
             </h2>
             <div className="field">
               <label
@@ -956,19 +971,23 @@ export default function Home() {
         </>
       ) : null}
 
-      <section className="card stage-fade stage-fade-delay-3" style={{ marginTop: 24 }}>
+      <section className="card stage-fade stage-fade-delay-4" style={{ marginTop: 24 }}>
         <h2>
           <span className="heading-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="14" height="14" focusable="false">
-              <path d="M12 3l7 4v5c0 4.4-3 8.4-7 9-4-0.6-7-4.6-7-9V7l7-4zm0 4.1L7 8.9v3.1c0 3.2 2 6.3 5 6.9 3-0.6 5-3.7 5-6.9V8.9l-5-1.8z" />
+              <path d="M12 2l2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9L12 2z" />
             </svg>
           </span>
-          Privacy
+          Tips for Best Results
         </h2>
-        <p>
-          All processing happens locally on your device in this browser, and your files are not uploaded to any server
-          by this app.
-        </p>
+        <ul style={{ margin: "10px 0 0", paddingLeft: 20, display: "grid", gap: 8 }}>
+          <li>Enable location in BeReal so timezones can be detected automatically whenever location data is included.</li>
+          <li>Use the start and end date filters to export only the time range you need and reduce processing time.</li>
+          <li>
+            Verify the processed photos before deleting your original BeReal export. Requesting a new export may take a
+            long time.
+          </li>
+        </ul>
       </section>
 
       <footer className="footer stage-fade stage-fade-delay-4">

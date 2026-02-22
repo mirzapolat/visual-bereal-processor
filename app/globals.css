@@ -372,7 +372,7 @@ select {
 .help-panel li {
   counter-increment: export-steps;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   margin: 0;
   padding: 10px 12px;
@@ -390,7 +390,7 @@ select {
   flex: 0 0 24px;
   width: 24px;
   height: 24px;
-  margin-top: 1px;
+  margin-top: 0;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 700;
