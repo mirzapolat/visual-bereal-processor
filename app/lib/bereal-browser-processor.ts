@@ -75,7 +75,12 @@ const COMBINED_OUTLINE_SIZE = 7;
 const COMBINED_POSITION = { x: 55, y: 55 };
 const textEncoder = new TextEncoder();
 
-const normalizePath = (value: string) => value.replace(/\\/g, "/").replace(/^\.\//, "");
+const normalizePath = (value: string) =>
+  value
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "");
 
 const basename = (value: string) => {
   const normalized = normalizePath(value).replace(/\/+$/, "");
@@ -146,19 +151,33 @@ const buildFileLookup = (
 };
 
 const findExportRootPrefix = (zip: JSZip) => {
-  const paths = Object.keys(zip.files).map(normalizePath);
-  const postsCandidates = paths.filter((value) => value.toLowerCase().endsWith("posts.json"));
+  const entries = Object.values(zip.files).map((zipObject) => ({
+    path: normalizePath(zipObject.name),
+    dir: zipObject.dir
+  }));
+  const allPaths = entries.map((entry) => entry.path);
+  const postsCandidates = entries
+    .filter((entry) => !entry.dir && entry.path.toLowerCase().endsWith("posts.json"))
+    .map((entry) => entry.path);
 
   for (const candidate of postsCandidates) {
     const prefix = candidate.slice(0, candidate.length - "posts.json".length);
     const photosPrefix = `${prefix}Photos/`.toLowerCase();
-    const hasPhotos = paths.some((value) => value.toLowerCase().startsWith(photosPrefix));
+    const hasPhotos = allPaths.some((value) => value.toLowerCase().startsWith(photosPrefix));
     if (hasPhotos) {
       return prefix;
     }
   }
 
-  return null;
+  const hasPhotosSomewhere = allPaths.some((value) => /(^|\/)photos\//i.test(value));
+  if (!hasPhotosSomewhere || postsCandidates.length === 0) {
+    return null;
+  }
+
+  // Fallback for exports where posts.json and Photos are packaged under different wrapper prefixes.
+  const bestCandidate = [...postsCandidates].sort((left, right) => left.length - right.length)[0];
+  return bestCandidate.slice(0, bestCandidate.length - "posts.json".length);
+
 };
 
 const findImageObject = (
@@ -552,7 +571,7 @@ const parsePosts = (value: unknown): PostPayload[] => {
 export async function extractExportDateBounds(inputZipFile: File): Promise<ExportDateBounds | null> {
   const zip = await JSZip.loadAsync(await inputZipFile.arrayBuffer());
   const rootPrefix = findExportRootPrefix(zip);
-  if (!rootPrefix) {
+  if (rootPrefix === null) {
     return null;
   }
 
@@ -638,7 +657,7 @@ export async function processBeRealExport(
 
   const zip = await JSZip.loadAsync(await inputZipFile.arrayBuffer());
   const rootPrefix = findExportRootPrefix(zip);
-  if (!rootPrefix) {
+  if (rootPrefix === null) {
     throw new Error("Could not find posts.json and a Photos folder inside the uploaded zip.");
   }
 

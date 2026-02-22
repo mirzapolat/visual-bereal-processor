@@ -45,3 +45,6 @@ Thumbs.db
 *.tar
 
 docker-compose.yaml
+
+Bereal Export/
+Bereal Export.zip
