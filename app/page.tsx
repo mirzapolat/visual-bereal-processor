@@ -992,6 +992,17 @@ export default function Home() {
 
       <footer className="footer stage-fade stage-fade-delay-4">
         <span>Created with ❤️ by Mirza Polat</span>
+        <a
+          className="footer-support pressable"
+          href="https://donate.stripe.com/aFa8wO78f6zndFp2xF0kE03"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false" fill="currentColor">
+            <path d="M12 21.593c-.525-.445-4.52-3.907-6.347-5.59C3.95 14.38 2 12.04 2 9.5 2 6.462 4.462 4 7.5 4c1.922 0 3.656 1.001 4.5 2.5C12.844 5.001 14.578 4 16.5 4 19.538 4 22 6.462 22 9.5c0 2.54-1.95 4.88-3.653 6.503C16.52 17.686 12.525 21.148 12 21.593z" />
+          </svg>
+          Support this project
+        </a>
         <p className="footer-disclaimer">
           Independent tool. This app is not affiliated with, approved by, or linked to BeReal.
         </p>
