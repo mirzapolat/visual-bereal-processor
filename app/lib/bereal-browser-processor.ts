@@ -709,9 +709,10 @@ const addMetadataToJpeg = async (
     exifMap[EXIF_OFFSET_TIME_DIGITIZED_TAG] = exifOffset;
   }
 
-  if (caption && caption.trim()) {
-    const zerothMap = exifPayload["0th"] as Record<number, unknown>;
-    zerothMap[piexif.ImageIFD.ImageDescription] = caption;
+  const zerothMap = exifPayload["0th"] as Record<number, unknown>;
+  const trimmedCaption = caption?.trim();
+  if (trimmedCaption) {
+    zerothMap[piexif.ImageIFD.ImageDescription] = trimmedCaption;
   }
 
   if (location) {
@@ -722,7 +723,16 @@ const addMetadataToJpeg = async (
     gpsMap[piexif.GPSIFD.GPSLongitude] = toExifDegrees(Math.abs(location.longitude));
   }
 
-  const exifString = piexif.dump(exifPayload);
+  // piexif encodes EXIF ASCII fields via btoa, which throws on non-Latin1
+  // characters (e.g. emojis in the caption). Retry without ImageDescription —
+  // the caption still lands in the UTF-8-safe IPTC payload below.
+  let exifString: string;
+  try {
+    exifString = piexif.dump(exifPayload);
+  } catch {
+    delete zerothMap[piexif.ImageIFD.ImageDescription];
+    exifString = piexif.dump(exifPayload);
+  }
   const updatedDataUrl = piexif.insert(exifString, dataUrl);
   const exifBlob = await dataUrlToBlob(updatedDataUrl);
 
