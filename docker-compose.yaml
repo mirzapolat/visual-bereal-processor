@@ -1,0 +1,26 @@
+services:
+  bereal-processor:
+    build: .
+    image: visual-bereal-processor
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Public base URL used for canonical links, sitemap and robots.
+      NEXT_PUBLIC_SITE_URL: https://mybereal.mirzapolat.com
+    expose:
+      - "3000"
+    networks:
+      - home
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.berealprocessor.rule: "Host(`mybereal.mirzapolat.com`)"
+      traefik.http.routers.berealprocessor.entrypoints: websecure
+      traefik.http.routers.berealprocessor.tls.certresolver: letsencrypt
+      traefik.http.routers.berealprocessor.middlewares: secure-headers@file,compress@file
+      traefik.http.services.berealprocessor.loadbalancer.server.port: "3000"
+    restart: unless-stopped
+
+# Joins the existing Traefik network (created/managed outside this project).
+networks:
+  home:
+    external: true

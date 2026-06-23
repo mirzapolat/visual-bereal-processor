@@ -34,9 +34,9 @@ docker build -t visual-bereal-processor .
 docker run --rm -p 3000:3000 visual-bereal-processor
 ```
 
-### Vercel
+### Docker Compose
 ```bash
-npm install
-npx vercel
-npx vercel --prod
+docker compose up --build
 ```
+Open [http://localhost:3000](http://localhost:3000). Set `NEXT_PUBLIC_SITE_URL`
+to override the public base URL used for canonical links, sitemap, and robots.

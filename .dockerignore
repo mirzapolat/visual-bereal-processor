@@ -1,6 +1,16 @@
 node_modules
 .next
 .git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yaml
 .DS_Store
 *.log
-.env
+.env*
+*.tsbuildinfo
+output
+Bereal Export
+Bereal Export.zip
+README.md
+LICENSE

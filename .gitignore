@@ -3,6 +3,8 @@ node_modules/
 .next/
 out/
 coverage/
+next-env.d.ts
+*.tsbuildinfo
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -16,23 +18,6 @@ pnpm-debug.log*
 .env.test.local
 .env.production.local
 
-# Vercel
-.vercel/
-
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.pyc
-.Python
-.venv/
-venv/
-ENV/
-
-# Pipenv
-Pipfile.lock
-
 # Mac / Windows
 .DS_Store
 Thumbs.db
@@ -44,7 +29,7 @@ Thumbs.db
 # Docker
 *.tar
 
-docker-compose.yaml
-
+# Local data / scratch
+output/
 Bereal Export/
 Bereal Export.zip

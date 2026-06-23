@@ -1,0 +1,46 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  APP_NAME: "visual-bereal-processor"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Sync Files to VPS (Rsync)
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "mkdir -p ~/docker/apps/${{ env.APP_NAME }}"
+          rsync -avz --delete-after \
+            --filter=":e- .gitignore" \
+            --filter="- .git/" \
+            --filter="- .github/" \
+            --filter="- .env" \
+            --filter="- .env.*" \
+            --filter="- instance/" \
+            --filter="- data/" \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }}" \
+            ./ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/docker/apps/${{ env.APP_NAME }}/
+
+      - name: Build & Restart Containers
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} " \
+            cd ~/docker/apps/${{ env.APP_NAME }} && \
+            DOCKER_BUILDKIT=1 docker compose up -d --build --remove-orphans && \
+            docker image prune -f "
